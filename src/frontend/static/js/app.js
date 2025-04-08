@@ -110,7 +110,7 @@ async function handleUpload(event) {
     }
     
     const formData = new FormData();
-    formData.append('video', videoFile);
+    formData.append('file', videoFile);
     
     try {
         isProcessing = true;

@@ -95,8 +95,8 @@ async def process_video_with_prompts(video_path: str, prompts: Dict[int, List[Di
         frame_indices = sorted(prompts.keys())
         
         for frame_idx in frame_indices:
-            # Set frame position
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            # Set frame position - convert to float to avoid type error
+            cap.set(cv2.CAP_PROP_POS_FRAMES, float(frame_idx))
             ret, frame = cap.read()
             
             if not ret:
@@ -123,10 +123,13 @@ async def process_video_with_prompts(video_path: str, prompts: Dict[int, List[Di
             
             # Process frame with SAM2
             if len(points) > 0:
+                # Ensure frame_idx is an integer for the SAM2 model
+                frame_idx_int = int(frame_idx)
+                
                 # Add points to the model
                 frame_idx, obj_ids, masks_frame = sam2_predictor.add_new_points_or_box(
                     inference_state=inference_state,
-                    frame_idx=frame_idx,
+                    frame_idx=frame_idx_int,
                     obj_id=None,
                     points=points,
                     labels=labels,
@@ -157,6 +160,15 @@ async def handle_upload(request):
     """Handle video upload"""
     global inference_state
     try:
+        # Check if SAM2 is initialized
+        if sam2_predictor is None:
+            initialized = await init_sam2()
+            if not initialized:
+                return web.json_response({
+                    "status": "error",
+                    "message": "SAM2 model not initialized. Please check server logs for details."
+                }, status=500)
+        
         # Check if the request has a video file
         if not request.content_type or not request.content_type.startswith('multipart/form-data'):
             return web.json_response({"status": "error", "message": "No video file provided"}, status=400)
@@ -188,30 +200,51 @@ async def handle_upload(request):
                 size += len(chunk)
                 await f.write(chunk)
         
+        # Get video properties using OpenCV
+        cap = cv2.VideoCapture(str(file_path))
+        if not cap.isOpened():
+            return web.json_response({"status": "error", "message": "Could not open video file"}, status=400)
+        
+        # Get video properties
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        # Release the video capture
+        cap.release()
+        
         # Initialize inference state with the video
-        inference_state = sam2_predictor.init_state(
-            str(file_path),
-            offload_video_to_cpu=True,  # Save GPU memory
-            offload_state_to_cpu=True   # Save GPU memory
-        )
-        
-        # Cache video info using the unique filename
-        video_cache[unique_filename] = {
-            "path": str(file_path),
-            "frames": inference_state['num_frames'],
-            "fps": inference_state['fps'],
-            "width": inference_state['width'],
-            "height": inference_state['height']
-        }
-        
-        return web.json_response({
-            "status": "success",
-            "filename": unique_filename,  # Return the unique filename to the client
-            "frames": inference_state['num_frames'],
-            "fps": inference_state['fps'],
-            "width": inference_state['width'],
-            "height": inference_state['height']
-        })
+        try:
+            inference_state = sam2_predictor.init_state(
+                str(file_path),
+                offload_video_to_cpu=True,  # Save GPU memory
+                offload_state_to_cpu=True   # Save GPU memory
+            )
+            
+            # Cache video info using the unique filename
+            video_cache[unique_filename] = {
+                "path": str(file_path),
+                "frames": total_frames,
+                "fps": fps,
+                "width": width,
+                "height": height
+            }
+            
+            return web.json_response({
+                "status": "success",
+                "filename": unique_filename,  # Return the unique filename to the client
+                "frames": total_frames,
+                "fps": fps,
+                "width": width,
+                "height": height
+            })
+        except Exception as e:
+            logger.error(f"Error initializing inference state: {e}")
+            # Clean up the file if it was created
+            if os.path.exists(file_path):
+                os.remove(str(file_path))
+            return web.json_response({"status": "error", "message": str(e)}, status=500)
     
     except Exception as e:
         logger.error(f"Error handling upload: {e}")
