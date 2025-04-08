@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAM2 Thermal Demo</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="upload-section">
+            <h2>Upload Video</h2>
+            <input type="file" id="videoInput" accept="video/*">
+            <button id="uploadButton">Upload</button>
+        </div>
+
+        <div class="video-section">
+            <canvas id="videoCanvas"></canvas>
+            <div class="controls">
+                <button id="playPauseButton">Play/Pause</button>
+                <input type="range" id="videoProgress" min="0" max="100" value="0">
+            </div>
+        </div>
+
+        <div class="segmentation-section">
+            <h3>Segmentation</h3>
+            <canvas id="segmentationCanvas"></canvas>
+            <div class="point-controls">
+                <button id="addPointButton">Add Point</button>
+                <button id="clearPointsButton">Clear Points</button>
+            </div>
+        </div>
+
+        <div class="thermal-section">
+            <h3>Thermal Analysis</h3>
+            <canvas id="histogramCanvas"></canvas>
+        </div>
+    </div>
+
+    <!-- Load OpenCV.js -->
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCVLoad();" onerror="onOpenCVError();"></script>
+    <script src="js/main.js"></script>
+</body>
+</html> 
