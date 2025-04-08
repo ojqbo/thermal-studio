@@ -1,192 +1,204 @@
 // Global variables
 let video = null;
 let videoCanvas = null;
-let videoCtx = null;
 let segmentationCanvas = null;
-let segmentationCtx = null;
 let histogramCanvas = null;
-let histogramCtx = null;
+let videoContext = null;
+let segmentationContext = null;
+let histogramContext = null;
 let isPlaying = false;
-let points = [];
+let currentFrame = null;
+let sam2Model = null;
 
-// Initialize when OpenCV is loaded
-function onOpenCVLoad() {
-    console.log('OpenCV.js is ready');
-    initializeCanvas();
-}
-
-function onOpenCVError() {
-    console.error('Failed to load OpenCV.js');
-}
-
-// Initialize canvas elements
-function initializeCanvas() {
+// Initialize the application
+async function init() {
+    // Get DOM elements
+    video = document.getElementById('video');
     videoCanvas = document.getElementById('videoCanvas');
-    videoCtx = videoCanvas.getContext('2d');
-    
     segmentationCanvas = document.getElementById('segmentationCanvas');
-    segmentationCtx = segmentationCanvas.getContext('2d');
-    
     histogramCanvas = document.getElementById('histogramCanvas');
-    histogramCtx = histogramCanvas.getContext('2d');
     
+    // Get contexts
+    videoContext = videoCanvas.getContext('2d');
+    segmentationContext = segmentationCanvas.getContext('2d');
+    histogramContext = histogramCanvas.getContext('2d');
+
+    // Set initial canvas sizes
+    videoCanvas.width = 800;
+    videoCanvas.height = 600;
+    segmentationCanvas.width = 800;
+    segmentationCanvas.height = 600;
+    histogramCanvas.width = 400;
+    histogramCanvas.height = 300;
+
     // Set up event listeners
-    setupEventListeners();
+    document.getElementById('uploadBtn').addEventListener('click', () => {
+        document.getElementById('videoInput').click();
+    });
+
+    document.getElementById('videoInput').addEventListener('change', handleVideoUpload);
+    document.getElementById('playPauseBtn').addEventListener('click', togglePlayPause);
+    document.getElementById('processBtn').addEventListener('click', processFrame);
+    document.getElementById('resetBtn').addEventListener('click', resetVideo);
+
+    // Initialize SAM2 model
+    try {
+        sam2Model = await loadSAM2Model();
+        console.log('SAM2 model loaded successfully');
+    } catch (error) {
+        console.error('Error loading SAM2 model:', error);
+        alert('Failed to load SAM2 model. Please check the console for details.');
+    }
 }
 
-// Set up event listeners
-function setupEventListeners() {
-    const uploadButton = document.getElementById('uploadButton');
-    const videoInput = document.getElementById('videoInput');
-    const playPauseButton = document.getElementById('playPauseButton');
-    const addPointButton = document.getElementById('addPointButton');
-    const clearPointsButton = document.getElementById('clearPointsButton');
-    
-    uploadButton.addEventListener('click', handleUpload);
-    videoInput.addEventListener('change', handleVideoSelect);
-    playPauseButton.addEventListener('click', togglePlayPause);
-    addPointButton.addEventListener('click', enablePointSelection);
-    clearPointsButton.addEventListener('click', clearPoints);
-    
-    // Add canvas click listener for point selection
-    videoCanvas.addEventListener('click', handleCanvasClick);
-}
-
-// Handle video file selection
-async function handleVideoSelect(event) {
+// Handle video file upload
+function handleVideoUpload(event) {
     const file = event.target.files[0];
-    if (!file) return;
-    
-    // Create video element
-    video = document.createElement('video');
-    video.src = URL.createObjectURL(file);
-    
-    // Wait for video metadata to load
-    await new Promise((resolve) => {
+    if (file) {
+        const url = URL.createObjectURL(file);
+        video.src = url;
         video.onloadedmetadata = () => {
             // Set canvas dimensions to match video
             videoCanvas.width = video.videoWidth;
             videoCanvas.height = video.videoHeight;
             segmentationCanvas.width = video.videoWidth;
             segmentationCanvas.height = video.videoHeight;
-            resolve();
+            
+            // Enable controls
+            document.getElementById('playPauseBtn').disabled = false;
+            document.getElementById('processBtn').disabled = false;
+            document.getElementById('resetBtn').disabled = false;
         };
-    });
-    
-    // Draw first frame
-    drawVideoFrame();
-}
-
-// Handle video upload
-async function handleUpload() {
-    const fileInput = document.getElementById('videoInput');
-    const file = fileInput.files[0];
-    if (!file) {
-        alert('Please select a video file first');
-        return;
-    }
-    
-    const formData = new FormData();
-    formData.append('video', file);
-    
-    try {
-        const response = await fetch('/upload', {
-            method: 'POST',
-            body: formData
-        });
-        
-        if (response.ok) {
-            const result = await response.text();
-            console.log('Upload successful:', result);
-        } else {
-            console.error('Upload failed:', await response.text());
-        }
-    } catch (error) {
-        console.error('Error uploading video:', error);
     }
 }
 
-// Draw current video frame
-function drawVideoFrame() {
-    if (!video || !videoCtx) return;
-    
-    videoCtx.drawImage(video, 0, 0, videoCanvas.width, videoCanvas.height);
-    
-    // Draw points
-    points.forEach(point => {
-        videoCtx.beginPath();
-        videoCtx.arc(point.x, point.y, 5, 0, 2 * Math.PI);
-        videoCtx.fillStyle = 'red';
-        videoCtx.fill();
-    });
-    
-    if (isPlaying) {
-        requestAnimationFrame(drawVideoFrame);
-    }
-}
-
-// Toggle play/pause
+// Toggle video play/pause
 function togglePlayPause() {
-    if (!video) return;
-    
-    isPlaying = !isPlaying;
-    if (isPlaying) {
+    if (video.paused) {
         video.play();
-        drawVideoFrame();
+        isPlaying = true;
+        document.getElementById('playPauseBtn').textContent = 'Pause';
+        requestAnimationFrame(updateFrame);
     } else {
         video.pause();
+        isPlaying = false;
+        document.getElementById('playPauseBtn').textContent = 'Play';
     }
 }
 
-// Enable point selection mode
-function enablePointSelection() {
-    videoCanvas.style.cursor = 'crosshair';
+// Update video frame
+function updateFrame() {
+    if (isPlaying) {
+        videoContext.drawImage(video, 0, 0, videoCanvas.width, videoCanvas.height);
+        currentFrame = videoContext.getImageData(0, 0, videoCanvas.width, videoCanvas.height);
+        requestAnimationFrame(updateFrame);
+    }
 }
 
-// Handle canvas click for point selection
-async function handleCanvasClick(event) {
-    if (!video || !videoCanvas) return;
-    
-    const rect = videoCanvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    
-    // Add point
-    points.push({ x, y });
-    
-    // Draw point
-    videoCtx.beginPath();
-    videoCtx.arc(x, y, 5, 0, 2 * Math.PI);
-    videoCtx.fillStyle = 'red';
-    videoCtx.fill();
-    
-    // Send point to backend
+// Process current frame with SAM2
+async function processFrame() {
+    if (!currentFrame || !sam2Model) return;
+
     try {
-        const response = await fetch('/point-prompt', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                x,
-                y,
-                frame: video.currentTime
-            })
-        });
+        // Convert frame to format expected by SAM2
+        const input = preprocessFrame(currentFrame);
         
-        if (response.ok) {
-            const result = await response.text();
-            console.log('Point processed:', result);
-        } else {
-            console.error('Point processing failed:', await response.text());
-        }
+        // Run SAM2 inference
+        const result = await sam2Model.predict(input);
+        
+        // Post-process and display results
+        displaySegmentation(result);
+        updateHistogram(result);
     } catch (error) {
-        console.error('Error processing point:', error);
+        console.error('Error processing frame:', error);
+        alert('Error processing frame. Please check the console for details.');
     }
 }
 
-// Clear all points
-function clearPoints() {
-    points = [];
-    drawVideoFrame();
-} 
+// Preprocess frame for SAM2
+function preprocessFrame(frame) {
+    // Convert ImageData to tensor and normalize
+    // This is a placeholder - actual implementation will depend on SAM2's requirements
+    return frame;
+}
+
+// Display segmentation results
+function displaySegmentation(result) {
+    // Clear previous segmentation
+    segmentationContext.clearRect(0, 0, segmentationCanvas.width, segmentationCanvas.height);
+    
+    // Draw new segmentation
+    // This is a placeholder - actual implementation will depend on SAM2's output format
+    segmentationContext.putImageData(result, 0, 0);
+}
+
+// Update temperature histogram
+function updateHistogram(result) {
+    // Calculate temperature distribution
+    const histogram = calculateHistogram(result);
+    
+    // Draw histogram
+    drawHistogram(histogram);
+}
+
+// Calculate temperature histogram
+function calculateHistogram(result) {
+    // Create a simple histogram from the frame data
+    const histogram = new Array(256).fill(0);
+    const data = result.data;
+    
+    for (let i = 0; i < data.length; i += 4) {
+        const value = data[i]; // Use red channel as temperature value
+        histogram[value]++;
+    }
+    
+    return histogram;
+}
+
+// Draw temperature histogram
+function drawHistogram(histogram) {
+    const ctx = histogramContext;
+    const width = histogramCanvas.width;
+    const height = histogramCanvas.height;
+    
+    // Clear previous histogram
+    ctx.clearRect(0, 0, width, height);
+    
+    // Find maximum value for scaling
+    const maxValue = Math.max(...histogram);
+    
+    // Draw histogram
+    ctx.fillStyle = '#2196F3';
+    const barWidth = width / histogram.length;
+    
+    histogram.forEach((value, index) => {
+        const barHeight = (value / maxValue) * height;
+        ctx.fillRect(
+            index * barWidth,
+            height - barHeight,
+            barWidth - 1,
+            barHeight
+        );
+    });
+}
+
+// Reset video to beginning
+function resetVideo() {
+    video.currentTime = 0;
+    video.pause();
+    isPlaying = false;
+    document.getElementById('playPauseBtn').textContent = 'Play';
+    videoContext.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
+    segmentationContext.clearRect(0, 0, segmentationCanvas.width, segmentationCanvas.height);
+    histogramContext.clearRect(0, 0, histogramCanvas.width, histogramCanvas.height);
+}
+
+// Load SAM2 model
+async function loadSAM2Model() {
+    // This is a placeholder - actual implementation will depend on how SAM2 is loaded
+    // You'll need to implement the actual model loading logic here
+    return null;
+}
+
+// Initialize when the page loads
+window.addEventListener('load', init); 

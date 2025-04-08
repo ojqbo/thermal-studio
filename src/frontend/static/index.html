@@ -3,42 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SAM2 Thermal Demo</title>
-    <link rel="stylesheet" href="css/style.css">
+    <title>Thermal Studio - SAM2 Demo</title>
+    <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="container">
-        <div class="upload-section">
-            <h2>Upload Video</h2>
-            <input type="file" id="videoInput" accept="video/*">
-            <button id="uploadButton">Upload</button>
-        </div>
+        <header>
+            <h1>Thermal Studio - SAM2 Demo</h1>
+            <p>Upload a thermal video and click points to segment objects</p>
+        </header>
 
-        <div class="video-section">
-            <canvas id="videoCanvas"></canvas>
-            <div class="controls">
-                <button id="playPauseButton">Play/Pause</button>
-                <input type="range" id="videoProgress" min="0" max="100" value="0">
+        <main>
+            <div class="video-section">
+                <video id="video" style="display: none;"></video>
+                <div class="canvas-container">
+                    <canvas id="videoCanvas"></canvas>
+                    <canvas id="segmentationCanvas"></canvas>
+                </div>
+                <div class="controls">
+                    <input type="file" id="videoInput" accept="video/*" style="display: none;">
+                    <button id="uploadBtn">Upload Video</button>
+                    <button id="playPauseBtn" disabled>Play</button>
+                    <button id="processBtn" disabled>Process Frame</button>
+                    <button id="resetBtn" disabled>Reset</button>
+                </div>
             </div>
-        </div>
 
-        <div class="segmentation-section">
-            <h3>Segmentation</h3>
-            <canvas id="segmentationCanvas"></canvas>
-            <div class="point-controls">
-                <button id="addPointButton">Add Point</button>
-                <button id="clearPointsButton">Clear Points</button>
+            <div class="analysis-section">
+                <div class="histogram-container">
+                    <h3>Thermal Histogram</h3>
+                    <canvas id="histogramCanvas"></canvas>
+                </div>
             </div>
-        </div>
-
-        <div class="thermal-section">
-            <h3>Thermal Analysis</h3>
-            <canvas id="histogramCanvas"></canvas>
-        </div>
+        </main>
     </div>
 
-    <!-- Load OpenCV.js -->
-    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCVLoad();" onerror="onOpenCVError();"></script>
-    <script src="js/main.js"></script>
+    <script src="/static/js/main.js"></script>
 </body>
 </html> 
