@@ -66,29 +66,45 @@ async def handle_upload(request):
                     break
                 f.write(chunk)
         
-        # Initialize SAM2 if not already done
-        if predictor is None:
-            await init_sam2()
-        
-        # Load video with SAM2 to get properties
+        # Get video properties using OpenCV
         try:
+            cap = cv2.VideoCapture(str(filepath))
+            if not cap.isOpened():
+                raise ValueError("Could not open video file")
+                
+            # Get video properties
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = float(cap.get(cv2.CAP_PROP_FPS))
+            num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            
+            cap.release()
+            
+            logger.info(f"Video loaded successfully: {filename}")
+            logger.info(f"Video properties: {width}x{height}, {fps} fps, {num_frames} frames")
+            
+            # Initialize SAM2 if not already done
+            if predictor is None:
+                await init_sam2()
+            
+            # Initialize SAM2 state with the video
             with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
                 current_state = predictor.init_state(str(filepath))
-                video_info = predictor.get_video_info()
-                logger.info(f"Video loaded successfully: {filename}")
-                logger.info(f"Video properties: {video_info}")
+                
         except Exception as e:
-            logger.error(f"Error loading video with SAM2: {str(e)}")
+            logger.error(f"Error loading video: {str(e)}")
+            if 'cap' in locals():
+                cap.release()
             filepath.unlink()  # Delete invalid video file
             return web.Response(text=f'Invalid video file: {str(e)}', status=400)
                 
         return web.json_response({
             'status': 'success',
             'filename': filename,
-            'frames': video_info['num_frames'],
-            'fps': video_info['fps'],
-            'width': video_info['width'],
-            'height': video_info['height']
+            'frames': num_frames,
+            'fps': fps,
+            'width': width,
+            'height': height
         })
     except Exception as e:
         logger.error(f"Error handling upload: {str(e)}")
@@ -131,8 +147,10 @@ async def handle_point_prompt(request):
             # Add point and get masks
             frame_idx, object_ids, masks = predictor.add_new_points_or_box(current_state, point_prompt)
             
-            # Get the frame with masks applied
-            result = predictor.get_frame_with_masks(frame_idx)
+            # Get the frame and apply masks
+            frame = current_state['frames'][frame_idx]
+            result = frame.copy()
+            result[masks[0] > 0] = [255, 0, 0]  # Highlight segmented area in red
             
             # Convert result to base64
             _, buffer = cv2.imencode('.jpg', cv2.cvtColor(result, cv2.COLOR_RGB2BGR))
@@ -171,13 +189,31 @@ async def handle_frame_extraction(request):
             with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
                 current_state = predictor.init_state(str(video_path))
         
+        # Get frame using OpenCV
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            return web.Response(text='Could not open video file', status=400)
+            
+        # Set frame position
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame)
+        ret, frame_data = cap.read()
+        cap.release()
+        
+        if not ret:
+            return web.Response(text='Could not read frame', status=400)
+            
+        # Convert BGR to RGB
+        frame_data = cv2.cvtColor(frame_data, cv2.COLOR_BGR2RGB)
+        
         # Process frame with SAM2
         with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-            # Get the frame with masks applied
-            result = predictor.get_frame_with_masks(frame)
+            # Apply any existing masks
+            if 'masks' in current_state and current_state['masks'] is not None:
+                for mask in current_state['masks']:
+                    frame_data[mask > 0] = [255, 0, 0]  # Highlight segmented areas in red
             
             # Convert frame to base64 for sending to frontend
-            _, buffer = cv2.imencode('.jpg', cv2.cvtColor(result, cv2.COLOR_RGB2BGR))
+            _, buffer = cv2.imencode('.jpg', cv2.cvtColor(frame_data, cv2.COLOR_RGB2BGR))
             frame_base64 = base64.b64encode(buffer).decode('utf-8')
             
             return web.json_response({
