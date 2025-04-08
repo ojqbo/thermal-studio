@@ -1,249 +1,343 @@
-import aiohttp
-from aiohttp import web
 import os
-import logging
 import json
-from pathlib import Path
+import asyncio
+import aiohttp
+import aiofiles
 import numpy as np
-from datetime import datetime
 import cv2
-import base64
+from aiohttp import web
+from pathlib import Path
+from datetime import datetime
+import logging
+from typing import Dict, List, Any, Optional
 import torch
 from sam2.build_sam import build_sam2_video_predictor
+import base64
 
 # Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Constants
-UPLOAD_DIR = Path('data/videos')
+BASE_DIR = Path(__file__).parent.parent.parent
+DATA_DIR = BASE_DIR / "data"
+UPLOAD_DIR = DATA_DIR / "videos"
+MASKS_DIR = DATA_DIR / "masks"
+MODEL_DIR = DATA_DIR / "models"
+
+# SAM2 model configuration
+MODEL_CONFIG = "configs/sam2.1/sam2.1_hiera_l.yaml"  # internal to sam2 package, do not change
+MODEL_CHECKPOINT = MODEL_DIR /"sam2.1_hiera_large.pt"
+
+# Ensure directories exist
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+MASKS_DIR.mkdir(parents=True, exist_ok=True)
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
+
+# Global variables
+sam2_predictor = None
+video_cache = {}
+inference_state = None
 
 # Initialize SAM2 model
-MODEL_CONFIG = "configs/sam2.1/sam2.1_hiera_l.yaml"
-MODEL_CHECKPOINT = "data/models/sam2.1_hiera_large.pt"
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
-# Global variables for SAM2
-predictor = None
-current_state = None
-
 async def init_sam2():
-    """Initialize the SAM2 model."""
-    global predictor
+    """Initialize the SAM2 model"""
+    global sam2_predictor
     try:
-        predictor = build_sam2_video_predictor(MODEL_CONFIG, MODEL_CHECKPOINT, device=DEVICE)
-        logger.info("SAM2 model initialized successfully")
+        sam2_predictor = build_sam2_video_predictor(
+            MODEL_CONFIG, MODEL_CHECKPOINT, device="cuda" if torch.cuda.is_available() else "cpu"
+        )
+        return True
     except Exception as e:
-        logger.error(f"Error initializing SAM2 model: {str(e)}")
+        logger.error(f"Error initializing SAM2: {e}")
+        return False
+
+# Process video with prompts
+async def process_video_with_prompts(video_path: str, prompts: Dict[int, List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """
+    Process a video with the given prompts using SAM2.
+    
+    Args:
+        video_path: Path to the video file
+        prompts: Dictionary mapping frame indices to lists of prompt points
+        
+    Returns:
+        Dictionary containing mask data for each frame
+    """
+    global sam2_predictor
+    
+    if sam2_predictor is None:
+        raise RuntimeError("SAM2 model not initialized")
+    
+    try:
+        # Open the video
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Could not open video: {video_path}")
+        
+        # Get video properties
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        # Initialize SAM2 state
+        inference_state = sam2_predictor.init_state(
+            video_path,
+            offload_video_to_cpu=True,  # Save GPU memory
+            offload_state_to_cpu=True   # Save GPU memory
+        )
+        
+        # Process each frame with prompts
+        masks = {}
+        
+        # Sort frame indices to process in order
+        frame_indices = sorted(prompts.keys())
+        
+        for frame_idx in frame_indices:
+            # Set frame position
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            
+            if not ret:
+                logger.warning(f"Could not read frame {frame_idx}")
+                continue
+            
+            # Convert BGR to RGB
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Get prompts for this frame
+            frame_prompts = prompts[frame_idx]
+            
+            # Prepare points and labels
+            points = []
+            labels = []
+            
+            for prompt in frame_prompts:
+                points.append([prompt["x"], prompt["y"]])
+                labels.append(prompt["label"])
+            
+            # Convert to numpy arrays
+            points = np.array(points)
+            labels = np.array(labels)
+            
+            # Process frame with SAM2
+            if len(points) > 0:
+                # Add points to the model
+                frame_idx, obj_ids, masks_frame = sam2_predictor.add_new_points_or_box(
+                    inference_state=inference_state,
+                    frame_idx=frame_idx,
+                    obj_id=None,
+                    points=points,
+                    labels=labels,
+                    clear_old_points=True
+                )
+                
+                # Store mask
+                masks[frame_idx] = masks_frame.tolist()
+        
+        # Release video capture
+        cap.release()
+        
+        return {
+            "status": "success",
+            "masks": masks,
+            "total_frames": total_frames,
+            "fps": fps,
+            "width": width,
+            "height": height
+        }
+    
+    except Exception as e:
+        logger.error(f"Error processing video: {e}")
         raise
 
-# Routes
-async def handle_root(request):
-    return web.FileResponse('src/frontend/static/index.html')
-
+# API Routes
 async def handle_upload(request):
+    """Handle video upload"""
+    global inference_state
     try:
+        # Check if the request has a video file
+        if not request.content_type or not request.content_type.startswith('multipart/form-data'):
+            return web.json_response({"status": "error", "message": "No video file provided"}, status=400)
+        
+        # Get the video file
         reader = await request.multipart()
         field = await reader.next()
         
-        if field.name != 'video':
-            return web.Response(text='No video file provided', status=400)
-            
-        # Generate unique filename with timestamp
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"{timestamp}_{field.filename}"
-        filepath = UPLOAD_DIR / filename
+        if field.name != 'file':
+            return web.json_response({"status": "error", "message": "No video field found"}, status=400)
         
-        # Save the video file
-        with open(filepath, 'wb') as f:
+        # Read the file
+        filename = field.filename
+        if not filename:
+            return web.json_response({"status": "error", "message": "No filename provided"}, status=400)
+        
+        # Generate a unique filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_filename = f"{timestamp}_{filename}"
+        file_path = UPLOAD_DIR / unique_filename
+        
+        # Save the file
+        size = 0
+        async with aiofiles.open(file_path, 'wb') as f:
             while True:
                 chunk = await field.read_chunk()
                 if not chunk:
                     break
-                f.write(chunk)
+                size += len(chunk)
+                await f.write(chunk)
         
-        # Get video properties using OpenCV
-        try:
-            cap = cv2.VideoCapture(str(filepath))
-            if not cap.isOpened():
-                raise ValueError("Could not open video file")
-                
-            # Get video properties
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = float(cap.get(cv2.CAP_PROP_FPS))
-            num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            
-            cap.release()
-            
-            logger.info(f"Video loaded successfully: {filename}")
-            logger.info(f"Video properties: {width}x{height}, {fps} fps, {num_frames} frames")
-            
-            # Initialize SAM2 if not already done
-            if predictor is None:
-                await init_sam2()
-            
-            # Initialize SAM2 state with the video
-            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-                current_state = predictor.init_state(str(filepath))
-                
-        except Exception as e:
-            logger.error(f"Error loading video: {str(e)}")
-            if 'cap' in locals():
-                cap.release()
-            filepath.unlink()  # Delete invalid video file
-            return web.Response(text=f'Invalid video file: {str(e)}', status=400)
-                
+        # Initialize inference state with the video
+        inference_state = sam2_predictor.init_state(
+            str(file_path),
+            offload_video_to_cpu=True,  # Save GPU memory
+            offload_state_to_cpu=True   # Save GPU memory
+        )
+        
+        # Cache video info using the unique filename
+        video_cache[unique_filename] = {
+            "path": str(file_path),
+            "frames": inference_state['num_frames'],
+            "fps": inference_state['fps'],
+            "width": inference_state['width'],
+            "height": inference_state['height']
+        }
+        
         return web.json_response({
-            'status': 'success',
-            'filename': filename,
-            'frames': num_frames,
-            'fps': fps,
-            'width': width,
-            'height': height
+            "status": "success",
+            "filename": unique_filename,  # Return the unique filename to the client
+            "frames": inference_state['num_frames'],
+            "fps": inference_state['fps'],
+            "width": inference_state['width'],
+            "height": inference_state['height']
         })
+    
     except Exception as e:
-        logger.error(f"Error handling upload: {str(e)}")
-        return web.Response(text=str(e), status=500)
+        logger.error(f"Error handling upload: {e}")
+        # Clean up the file if it was created
+        if 'file_path' in locals() and os.path.exists(file_path):
+            os.remove(str(file_path))
+        return web.json_response({"status": "error", "message": str(e)}, status=500)
 
-async def handle_point_prompt(request):
+async def handle_process_video(request):
+    """Handle video processing with prompts"""
     try:
-        global predictor, current_state
+        # Check if SAM2 is initialized
+        if sam2_predictor is None:
+            initialized = await init_sam2()
+            if not initialized:
+                return web.json_response({
+                    "status": "error",
+                    "message": "SAM2 model not initialized. Please check server logs for details."
+                }, status=500)
         
-        if predictor is None:
-            await init_sam2()
-        
+        # Get request data
         data = await request.json()
-        video_path = UPLOAD_DIR / data.get('filename')
+        filename = data.get('filename')
+        prompts = data.get('prompts', {})
         
-        if not video_path.exists():
-            return web.Response(text='Video file not found', status=404)
-            
-        # Get point coordinates and frame number
-        x = data.get('x')
-        y = data.get('y')
-        frame = data.get('frame')
+        if not filename:
+            return web.json_response({"status": "error", "message": "No filename provided"}, status=400)
         
-        if None in (x, y, frame):
-            return web.Response(text='Missing required parameters', status=400)
-            
-        # Initialize state if needed
-        if current_state is None:
-            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-                current_state = predictor.init_state(str(video_path))
+        # Get video info from cache
+        video_info = video_cache.get(filename)
+        if not video_info:
+            return web.json_response({"status": "error", "message": "Video not found"}, status=404)
         
-        # Process point with SAM2
-        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-            # Create point prompt
-            point_prompt = {
-                'points': np.array([[x, y]]),
-                'labels': np.array([1])  # 1 for foreground
-            }
+        # Process video with SAM2
+        try:
+            # Process video with prompts
+            masks = await process_video_with_prompts(video_info['path'], prompts)
             
-            # Add point and get masks
-            frame_idx, object_ids, masks = predictor.add_new_points_or_box(current_state, point_prompt)
-            
-            # Get the frame and apply masks
-            frame = current_state['frames'][frame_idx]
-            result = frame.copy()
-            result[masks[0] > 0] = [255, 0, 0]  # Highlight segmented area in red
-            
-            # Convert result to base64
-            _, buffer = cv2.imencode('.jpg', cv2.cvtColor(result, cv2.COLOR_RGB2BGR))
-            frame_base64 = base64.b64encode(buffer).decode('utf-8')
+            # Save masks
+            mask_path = MASKS_DIR / f"{filename}_masks.json"
+            async with aiofiles.open(mask_path, 'w') as f:
+                await f.write(json.dumps({
+                    'masks': masks['masks'],
+                    'total_frames': masks['total_frames'],
+                    'fps': masks['fps'],
+                    'width': masks['width'],
+                    'height': masks['height']
+                }))
             
             return web.json_response({
-                'status': 'success',
-                'frame': frame_idx,
-                'point': {'x': x, 'y': y},
-                'frame_data': frame_base64
+                "status": "success",
+                "masks": masks['masks']
             })
             
-    except Exception as e:
-        logger.error(f"Error handling point prompt: {str(e)}")
-        return web.Response(text=str(e), status=500)
-
-async def handle_frame_extraction(request):
-    try:
-        global predictor, current_state
-        
-        if predictor is None:
-            await init_sam2()
-        
-        data = await request.json()
-        video_path = UPLOAD_DIR / data.get('filename')
-        
-        if not video_path.exists():
-            return web.Response(text='Video file not found', status=404)
-            
-        frame = data.get('frame')
-        if frame is None:
-            return web.Response(text='Missing frame parameter', status=400)
-            
-        # Initialize state if needed
-        if current_state is None:
-            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-                current_state = predictor.init_state(str(video_path))
-        
-        # Get frame using OpenCV
-        cap = cv2.VideoCapture(str(video_path))
-        if not cap.isOpened():
-            return web.Response(text='Could not open video file', status=400)
-            
-        # Set frame position
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame)
-        ret, frame_data = cap.read()
-        cap.release()
-        
-        if not ret:
-            return web.Response(text='Could not read frame', status=400)
-            
-        # Convert BGR to RGB
-        frame_data = cv2.cvtColor(frame_data, cv2.COLOR_BGR2RGB)
-        
-        # Process frame with SAM2
-        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-            # Apply any existing masks
-            if 'masks' in current_state and current_state['masks'] is not None:
-                for mask in current_state['masks']:
-                    frame_data[mask > 0] = [255, 0, 0]  # Highlight segmented areas in red
-            
-            # Convert frame to base64 for sending to frontend
-            _, buffer = cv2.imencode('.jpg', cv2.cvtColor(frame_data, cv2.COLOR_RGB2BGR))
-            frame_base64 = base64.b64encode(buffer).decode('utf-8')
-            
+        except Exception as e:
+            logger.error(f"Error processing video with SAM2: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return web.json_response({
-                'status': 'success',
-                'frame': frame,
-                'frame_data': frame_base64
-            })
+                "status": "error",
+                "message": f"Error processing video: {str(e)}"
+            }, status=500)
             
     except Exception as e:
-        logger.error(f"Error handling frame extraction: {str(e)}")
-        return web.Response(text=str(e), status=500)
+        logger.error(f"Error handling process video request: {e}")
+        return web.json_response({
+            "status": "error",
+            "message": str(e)
+        }, status=500)
+
+async def handle_get_masks(request):
+    """Handle retrieving mask data"""
+    try:
+        # Get filename from path
+        filename = request.match_info.get('filename')
+        if not filename:
+            return web.json_response({"status": "error", "message": "No filename provided"}, status=400)
+        
+        # Check if masks file exists
+        mask_filename = f"{os.path.splitext(filename)[0]}_masks.json"
+        mask_path = MASKS_DIR / mask_filename
+        
+        if not mask_path.exists():
+            return web.json_response({"status": "error", "message": "Masks not found"}, status=404)
+        
+        # Read masks file
+        async with aiofiles.open(mask_path, 'r') as f:
+            content = await f.read()
+            masks_data = json.loads(content)
+        
+        return web.json_response(masks_data)
+    
+    except Exception as e:
+        logger.error(f"Error retrieving masks: {e}")
+        return web.json_response({"status": "error", "message": str(e)}, status=500)
+
+async def handle_root(request):
+    """Serve the index.html file"""
+    return web.FileResponse(BASE_DIR / "src" / "frontend" / "static" / "index.html")
 
 # Create application
 app = web.Application()
 
 # Add routes
-app.router.add_get('/', handle_root)  # Add root route handler
+app.router.add_get('/', handle_root)  # Add root route
 app.router.add_post('/upload', handle_upload)
-app.router.add_post('/point-prompt', handle_point_prompt)
-app.router.add_post('/frame-extraction', handle_frame_extraction)
+app.router.add_post('/process-video', handle_process_video)
+app.router.add_get('/get-masks/{filename}', handle_get_masks)
 
-# Serve static files
-app.router.add_static('/static', 'src/frontend/static')
+# Add static routes for different content types
+app.router.add_static('/static', path=str(BASE_DIR / "src" / "frontend" / "static"))
+app.router.add_static('/static/videos', path=str(UPLOAD_DIR))  # Serve videos from data/videos
+app.router.add_static('/static/masks', path=str(MASKS_DIR))  # Serve masks from data/masks
+
+async def startup(app):
+    """Initialize the application on startup."""
+    try:
+        # Initialize SAM2 model
+        initialized = await init_sam2()
+        if not initialized:
+            logger.warning("SAM2 model initialization failed. The model will be initialized on first use.")
+    except Exception as e:
+        logger.error(f"Error during startup: {e}")
+        logger.warning("SAM2 model initialization failed. The model will be initialized on first use.")
+
+app.on_startup.append(startup)
 
 if __name__ == '__main__':
-    # Development server settings
-    web.run_app(
-        app,
-        host='0.0.0.0',
-        port=8080,
-        access_log=logging.getLogger('aiohttp.access'),
-        access_log_format='%a %t "%r" %s %b "%{Referer}i" "%{User-Agent}i"'
-    ) 
+    web.run_app(app, host='0.0.0.0', port=8080) 
