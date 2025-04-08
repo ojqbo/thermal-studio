@@ -7,6 +7,10 @@ from pathlib import Path
 import decord
 import numpy as np
 from datetime import datetime
+import cv2
+import base64
+import torch
+from sam2.build_sam import build_sam2_video_predictor
 
 # Configure logging
 logging.basicConfig(
@@ -18,6 +22,25 @@ logger = logging.getLogger(__name__)
 # Constants
 UPLOAD_DIR = Path('data/videos')
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Initialize SAM2 model
+MODEL_CONFIG = "configs/sam2.1/sam2.1_hiera_l.yaml"
+MODEL_CHECKPOINT = "checkpoints/sam2.1_hiera_large.pt"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Global variables for SAM2
+predictor = None
+current_state = None
+
+async def init_sam2():
+    """Initialize the SAM2 model."""
+    global predictor
+    try:
+        predictor = build_sam2_video_predictor(MODEL_CONFIG, MODEL_CHECKPOINT, device=DEVICE)
+        logger.info("SAM2 model initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing SAM2 model: {str(e)}")
+        raise
 
 # Routes
 async def handle_root(request):
@@ -67,6 +90,11 @@ async def handle_upload(request):
 
 async def handle_point_prompt(request):
     try:
+        global predictor, current_state
+        
+        if predictor is None:
+            await init_sam2()
+        
         data = await request.json()
         video_path = UPLOAD_DIR / data.get('filename')
         
@@ -88,21 +116,48 @@ async def handle_point_prompt(request):
         
         frame_data = vr[frame_idx].asnumpy()
         
-        # TODO: Process point with SAM2 model
-        # For now, return dummy response
-        return web.json_response({
-            'status': 'success',
-            'frame': frame_idx,
-            'point': {'x': x, 'y': y},
-            'message': 'Point processed (dummy response)'
-        })
+        # Initialize state if needed
+        if current_state is None:
+            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+                current_state = predictor.init_state(frame_data)
         
+        # Process point with SAM2
+        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+            # Create point prompt
+            point_prompt = {
+                'points': np.array([[x, y]]),
+                'labels': np.array([1])  # 1 for foreground
+            }
+            
+            # Add point and get masks
+            frame_idx, object_ids, masks = predictor.add_new_points_or_box(current_state, point_prompt)
+            
+            # Apply mask to frame
+            result = frame_data.copy()
+            result[masks[0] > 0] = [255, 0, 0]  # Highlight segmented area in red
+            
+            # Convert result to base64
+            _, buffer = cv2.imencode('.jpg', cv2.cvtColor(result, cv2.COLOR_RGB2BGR))
+            frame_base64 = base64.b64encode(buffer).decode('utf-8')
+            
+            return web.json_response({
+                'status': 'success',
+                'frame': frame_idx,
+                'point': {'x': x, 'y': y},
+                'frame_data': frame_base64
+            })
+            
     except Exception as e:
         logger.error(f"Error handling point prompt: {str(e)}")
         return web.Response(text=str(e), status=500)
 
 async def handle_frame_extraction(request):
     try:
+        global predictor, current_state
+        
+        if predictor is None:
+            await init_sam2()
+        
         data = await request.json()
         video_path = UPLOAD_DIR / data.get('filename')
         
@@ -120,18 +175,32 @@ async def handle_frame_extraction(request):
         
         frame_data = vr[frame_idx].asnumpy()
         
-        # Convert frame to base64 for sending to frontend
-        import base64
-        import cv2
-        _, buffer = cv2.imencode('.jpg', cv2.cvtColor(frame_data, cv2.COLOR_RGB2BGR))
-        frame_base64 = base64.b64encode(buffer).decode('utf-8')
+        # Initialize state if needed
+        if current_state is None:
+            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+                current_state = predictor.init_state(frame_data)
         
-        return web.json_response({
-            'status': 'success',
-            'frame': frame_idx,
-            'frame_data': frame_base64
-        })
-        
+        # Process frame with SAM2
+        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+            # Propagate masks to current frame
+            for curr_frame_idx, curr_object_ids, curr_masks in predictor.propagate_in_video(current_state):
+                if curr_frame_idx == frame_idx:
+                    # Apply masks to frame
+                    result = frame_data.copy()
+                    for mask in curr_masks:
+                        result[mask > 0] = [255, 0, 0]  # Highlight segmented areas in red
+                    break
+            
+            # Convert frame to base64 for sending to frontend
+            _, buffer = cv2.imencode('.jpg', cv2.cvtColor(result, cv2.COLOR_RGB2BGR))
+            frame_base64 = base64.b64encode(buffer).decode('utf-8')
+            
+            return web.json_response({
+                'status': 'success',
+                'frame': frame_idx,
+                'frame_data': frame_base64
+            })
+            
     except Exception as e:
         logger.error(f"Error handling frame extraction: {str(e)}")
         return web.Response(text=str(e), status=500)

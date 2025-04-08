@@ -28,10 +28,9 @@
 - [ ] Set up Docker configuration with GPU support
 - [ ] Create requirements.txt with necessary Python dependencies
   - [ ] aiohttp
-  - [ ] decord
   - [ ] torch
   - [ ] torchvision
-  - [ ] SAM2 dependencies
+  - [ ] sam2
 - [ ] Set up basic aiohttp server structure
 
 ### 2. Backend Development
