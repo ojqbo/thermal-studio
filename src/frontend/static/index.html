@@ -3,18 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Video Segmentation Tool</title>
+    <title>Segment Anything 2 Demo</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Video Segmentation Tool</h1>
-            <p>Upload a video and use SAM2 for segmentation</p>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="header-left">
+                <h1>Segment Anything 2 Demo</h1>
+                <p class="subtitle">A Meta FAIR Demo</p>
+            </div>
+            <nav class="header-nav">
+                <a href="#about">About</a>
+                <a href="#dataset">Dataset</a>
+                <a href="#demos">AI Demos</a>
+            </nav>
         </header>
-        
-        <main>
-            <section class="upload-section">
+
+        <main class="app-main">
+            <section class="upload-section" id="upload-section">
                 <form id="upload-form">
                     <div class="file-input-container">
                         <label for="file-input" class="file-input-label">Choose Video File</label>
@@ -23,72 +30,71 @@
                     <button type="submit" id="upload-btn" disabled>Upload</button>
                 </form>
             </section>
-            
-            <section id="video-section" class="video-section" style="display: none;">
-                <div class="canvas-container">
-                    <canvas id="canvas"></canvas>
-                </div>
-                
-                <div class="controls">
-                    <div class="mode-controls">
-                        <label class="mode-toggle-label">
-                            <span>Setup Mode</span>
-                            <div class="toggle-switch">
-                                <input type="checkbox" id="mode-toggle">
-                                <span class="toggle-slider"></span>
+
+            <div class="workspace" id="workspace" style="display: none;">
+                <aside class="sidebar">
+                    <div class="step-indicator">
+                        <span class="step-number">1/3</span>
+                        <h2>Select objects</h2>
+                        <p class="step-description">Adjust the selection of your object, or add additional objects. Press "Track objects" to track your objects throughout the video.</p>
+                    </div>
+
+                    <div class="objects-list">
+                        <div class="object-item" id="object-1">
+                            <div class="object-preview">
+                                <canvas class="object-thumbnail"></canvas>
                             </div>
-                            <span>Viewing Mode</span>
-                        </label>
+                            <div class="object-label">Object 1</div>
+                            <div class="object-controls">
+                                <button class="add-point-btn" data-action="add">
+                                    <span class="icon">+</span> Add
+                                </button>
+                                <button class="remove-point-btn" data-action="remove">
+                                    <span class="icon">-</span> Remove
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="add-object-btn" id="add-object">
+                        <span class="icon">+</span> Add another object
+                    </button>
+
+                    <div class="bottom-controls">
+                        <button class="secondary-btn" id="start-over">
+                            <span class="icon">↺</span> Start over
+                        </button>
+                        <button class="primary-btn" id="track-objects">
+                            Track objects <span class="icon">→</span>
+                        </button>
+                    </div>
+                </aside>
+
+                <section class="main-content">
+                    <div class="canvas-container">
+                        <canvas id="canvas"></canvas>
+                        <div class="tooltip" id="tooltip">
+                            <p>Tip: Not what you expected? Add a few more clicks until the full object you want is selected.</p>
+                            <a href="#" class="learn-more">Learn more</a>
+                            <button class="ok-btn">Ok</button>
+                        </div>
                     </div>
                     
-                    <div class="point-controls">
-                        <div class="point-type-selector">
-                            <label for="point-type">Point Type:</label>
-                            <select id="point-type">
-                                <option value="1">Positive</option>
-                                <option value="0">Negative</option>
-                            </select>
-                        </div>
-                        
-                        <div class="point-buttons">
-                            <button id="clear-points">Clear Current Frame Points</button>
-                            <button id="clear-all-points">Clear All Points</button>
-                            <button id="process-video" class="primary-button">Process Video</button>
+                    <div class="video-timeline">
+                        <div class="timeline-controls">
+                            <button id="play-pause" class="play-btn">
+                                <span class="icon">▶</span>
+                            </button>
+                            <div class="timeline-slider">
+                                <input type="range" id="frame-slider" min="0" max="100" value="0">
+                                <div class="frame-preview" id="frame-preview"></div>
+                            </div>
+                            <span id="frame-display" class="time-display">0:00</span>
                         </div>
                     </div>
-                    
-                    <div id="mask-controls" class="mask-controls" style="display: none;">
-                        <h3>Mask Settings</h3>
-                        <div class="mask-opacity-control">
-                            <label for="mask-opacity">Opacity:</label>
-                            <input type="range" id="mask-opacity" min="0" max="1" step="0.1" value="0.5">
-                            <span id="opacity-value">50%</span>
-                        </div>
-                        <div class="mask-color-control">
-                            <label for="mask-color">Color:</label>
-                            <input type="color" id="mask-color" value="#ff0000">
-                        </div>
-                    </div>
-                    
-                    <div class="video-controls">
-                        <button id="play-pause">Play</button>
-                        <input type="range" id="frame-slider" min="0" max="100" value="0">
-                        <span id="frame-display">Frame: 0 / 0</span>
-                    </div>
-                </div>
-            </section>
-            
-            <section id="analysis-section" class="analysis-section" style="display: none;">
-                <h2>Analysis</h2>
-                <div id="histogram-container" class="histogram-container">
-                    <!-- Histogram will be displayed here -->
-                </div>
-            </section>
+                </section>
+            </div>
         </main>
-        
-        <footer>
-            <p>&copy; 2023 Video Segmentation Tool</p>
-        </footer>
     </div>
     
     <script src="/static/js/app.js"></script>

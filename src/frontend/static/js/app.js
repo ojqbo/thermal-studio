@@ -12,40 +12,41 @@ let videoHeight = 0;
 let isProcessing = false;
 let currentVideo = null;  // Store current video information
 
-// New state variables for the two-phase interface
-let currentMode = 'setup'; // 'setup' or 'viewing'
-let currentPointType = 1; // 1 for positive, 0 for negative
-let framePrompts = {}; // {frameIndex: [{x, y, label}, ...]}
-let maskData = null; // Will store mask data from backend
-
-// Mask visualization settings
+// Mask state
+let masks = {}; // {frameIndex: {objectId: maskData}}
 let maskOpacity = 0.5;
-let maskColor = 'rgba(255, 0, 0, 0.5)'; // Default red with 50% opacity
+let maskColors = [
+    'rgba(255, 165, 0, 0.5)',  // Orange
+    'rgba(106, 90, 205, 0.5)', // Slate blue
+    'rgba(50, 205, 50, 0.5)',  // Lime green
+    'rgba(255, 105, 180, 0.5)', // Hot pink
+    'rgba(70, 130, 180, 0.5)'  // Steel blue
+];
+
+// Object tracking state
+let objects = [{
+    id: 1,
+    label: 'Object 1',
+    thumbnail: null,
+    points: {}, // {frameIndex: [{x, y, label}]}
+    color: maskColors[0]
+}];
+let currentObjectId = 1;
+let currentAction = 'add'; // 'add' or 'remove'
 
 // DOM elements
 const uploadForm = document.getElementById('upload-form');
-const videoSection = document.getElementById('video-section');
-const canvasContainer = document.getElementById('canvas-container');
-const controls = document.getElementById('controls');
+const uploadSection = document.getElementById('upload-section');
+const workspace = document.getElementById('workspace');
+const canvas = document.getElementById('canvas');
+const playPauseBtn = document.getElementById('play-pause');
 const frameSlider = document.getElementById('frame-slider');
 const frameDisplay = document.getElementById('frame-display');
-const playPauseBtn = document.getElementById('play-pause');
-const uploadBtn = document.getElementById('upload-btn');
+const addObjectBtn = document.getElementById('add-object');
+const startOverBtn = document.getElementById('start-over');
+const trackObjectsBtn = document.getElementById('track-objects');
+const tooltip = document.getElementById('tooltip');
 const fileInput = document.getElementById('file-input');
-const analysisSection = document.getElementById('analysis-section');
-const histogramContainer = document.getElementById('histogram-container');
-
-// New UI elements
-const modeToggle = document.getElementById('mode-toggle');
-const pointTypeSelector = document.getElementById('point-type');
-const processVideoBtn = document.getElementById('process-video');
-const clearPointsBtn = document.getElementById('clear-points');
-const clearAllPointsBtn = document.getElementById('clear-all-points');
-const canvas = document.getElementById('canvas');
-
-// Mask control elements
-const maskOpacitySlider = document.getElementById('mask-opacity');
-const maskColorSelector = document.getElementById('mask-color');
 
 // Initialize the application
 function init() {
@@ -64,28 +65,22 @@ function init() {
     playPauseBtn.addEventListener('click', togglePlayPause);
     frameSlider.addEventListener('input', handleFrameChange);
     
-    // Add event listeners for new UI elements
-    modeToggle.addEventListener('change', handleModeChange);
-    pointTypeSelector.addEventListener('change', handlePointTypeChange);
-    processVideoBtn.addEventListener('click', handleProcessVideo);
-    clearPointsBtn.addEventListener('click', clearCurrentFramePoints);
-    clearAllPointsBtn.addEventListener('click', clearAllPoints);
+    // Add event listeners for object controls
+    addObjectBtn.addEventListener('click', handleAddObject);
+    startOverBtn.addEventListener('click', handleStartOver);
+    trackObjectsBtn.addEventListener('click', handleTrackObjects);
     
     // Add canvas click handler for point placement
     canvasElement.addEventListener('click', handleCanvasClick);
     canvasElement.addEventListener('contextmenu', handleCanvasRightClick);
     
-    // Add mask control event listeners
-    if (maskOpacitySlider) {
-        maskOpacitySlider.addEventListener('input', handleMaskOpacityChange);
-    }
+    // Add tooltip close handler
+    document.querySelector('.tooltip .ok-btn').addEventListener('click', () => {
+        tooltip.style.display = 'none';
+    });
     
-    if (maskColorSelector) {
-        maskColorSelector.addEventListener('change', handleMaskColorChange);
-    }
-    
-    // Initialize UI state
-    updateUIState();
+    // Initialize objects list
+    updateObjectsList();
 }
 
 // Handle file selection
@@ -93,10 +88,10 @@ function handleFileSelect(event) {
     const file = event.target.files[0];
     if (file && file.type.startsWith('video/')) {
         videoFile = file;
-        uploadBtn.disabled = false;
+        document.getElementById('upload-btn').disabled = false;
     } else {
         alert('Please select a valid video file');
-        uploadBtn.disabled = true;
+        document.getElementById('upload-btn').disabled = true;
     }
 }
 
@@ -146,7 +141,7 @@ async function handleUpload(event) {
             // Update UI
             frameSlider.max = totalFrames - 1;
             frameSlider.value = 0;
-            frameDisplay.textContent = `Frame: 0 / ${totalFrames - 1}`;
+            frameDisplay.textContent = formatTime(0);
             
             // Load the video
             await loadVideo(data.filename);
@@ -154,9 +149,12 @@ async function handleUpload(event) {
             // Reset state for new video
             resetState();
             
-            // Show video section
-            videoSection.style.display = 'block';
-            analysisSection.style.display = 'block';
+            // Show workspace
+            uploadSection.style.display = 'none';
+            workspace.style.display = 'flex';
+            
+            // Show tooltip
+            tooltip.style.display = 'block';
         } else {
             throw new Error('Upload failed: ' + data.message);
         }
@@ -173,7 +171,7 @@ async function handleUpload(event) {
 async function loadVideo(filename) {
     return new Promise((resolve, reject) => {
         videoElement = document.createElement('video');
-        videoElement.src = `/static/videos/${filename}`;  // This path is correct as it matches the server's static route
+        videoElement.src = `/static/videos/${filename}`;
         videoElement.crossOrigin = 'anonymous';
         
         videoElement.addEventListener('loadedmetadata', () => {
@@ -184,7 +182,7 @@ async function loadVideo(filename) {
             // Draw first frame
             videoElement.currentTime = 0;
             videoElement.addEventListener('seeked', () => {
-                ctx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+                drawFrame();
                 resolve();
             }, { once: true });
         });
@@ -196,19 +194,85 @@ async function loadVideo(filename) {
     });
 }
 
-// Toggle play/pause
-function togglePlayPause() {
-    if (!videoElement) return;
+// Handle canvas click for point placement
+function handleCanvasClick(event) {
+    event.preventDefault();
     
-    if (isPlaying) {
-        videoElement.pause();
-        playPauseBtn.textContent = 'Play';
-    } else {
-        videoElement.play();
-        playPauseBtn.textContent = 'Pause';
+    if (!videoElement || isProcessing) return;
+    
+    const rect = canvasElement.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    
+    // Scale coordinates to actual video dimensions
+    const scaleX = videoWidth / canvasElement.width;
+    const scaleY = videoHeight / canvasElement.height;
+    
+    const point = {
+        x: x * scaleX,
+        y: y * scaleY,
+        label: currentAction === 'add' ? 1 : 0
+    };
+    
+    // Add point to current object
+    const currentObject = objects.find(obj => obj.id === currentObjectId);
+    if (currentObject) {
+        if (!currentObject.points[currentFrame]) {
+            currentObject.points[currentFrame] = [];
+        }
+        currentObject.points[currentFrame].push(point);
+        
+        // Update thumbnail if this is the first point
+        if (!currentObject.thumbnail) {
+            updateObjectThumbnail(currentObject.id);
+        }
+        
+        // Redraw frame with points
+        drawFrame();
     }
+}
+
+// Handle canvas right click for point removal
+function handleCanvasRightClick(event) {
+    event.preventDefault();
     
-    isPlaying = !isPlaying;
+    if (!videoElement || isProcessing) return;
+    
+    const rect = canvasElement.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    
+    // Scale coordinates to actual video dimensions
+    const scaleX = videoWidth / canvasElement.width;
+    const scaleY = videoHeight / canvasElement.height;
+    const clickX = x * scaleX;
+    const clickY = y * scaleY;
+    
+    // Find and remove the closest point within 10 pixels
+    const currentObject = objects.find(obj => obj.id === currentObjectId);
+    if (currentObject && currentObject.points[currentFrame]) {
+        const points = currentObject.points[currentFrame];
+        let closestIndex = -1;
+        let minDistance = 10;
+        
+        points.forEach((point, index) => {
+            const distance = Math.sqrt(
+                Math.pow(point.x - clickX, 2) + Math.pow(point.y - clickY, 2)
+            );
+            if (distance < minDistance) {
+                minDistance = distance;
+                closestIndex = index;
+            }
+        });
+        
+        if (closestIndex !== -1) {
+            points.splice(closestIndex, 1);
+            if (points.length === 0) {
+                delete currentObject.points[currentFrame];
+            }
+            drawFrame();
+        }
+    }
 }
 
 // Handle frame change
@@ -217,262 +281,187 @@ function handleFrameChange() {
     
     currentFrame = parseInt(frameSlider.value);
     videoElement.currentTime = currentFrame / fps;
-    frameDisplay.textContent = `Frame: ${currentFrame} / ${totalFrames - 1}`;
+    frameDisplay.textContent = formatTime(currentFrame / fps);
     
-    // Draw current frame
+    drawFrame();
+}
+
+// Toggle play/pause
+function togglePlayPause() {
+    if (!videoElement) return;
+    
+    if (isPlaying) {
+        videoElement.pause();
+        playPauseBtn.innerHTML = '<span class="icon">▶</span>';
+    } else {
+        videoElement.play();
+        playPauseBtn.innerHTML = '<span class="icon">⏸</span>';
+        requestAnimationFrame(updatePlayback);
+    }
+    
+    isPlaying = !isPlaying;
+}
+
+// Update playback
+function updatePlayback() {
+    if (!isPlaying) return;
+    
+    currentFrame = Math.floor(videoElement.currentTime * fps);
+    frameSlider.value = currentFrame;
+    frameDisplay.textContent = formatTime(videoElement.currentTime);
+    
+    drawFrame();
+    
+    if (currentFrame < totalFrames - 1) {
+        requestAnimationFrame(updatePlayback);
+    } else {
+        togglePlayPause();
+    }
+}
+
+// Draw current frame with points and masks
+function drawFrame() {
+    if (!ctx || !videoElement) return;
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    
+    // Draw video frame
     ctx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
     
-    // Draw points for current frame if in setup mode
-    if (currentMode === 'setup') {
-        drawPointsForFrame(currentFrame);
+    // Draw masks for current frame if available
+    if (masks[currentFrame]) {
+        drawMasks(masks[currentFrame]);
     }
     
-    // Draw masks if in viewing mode
-    if (currentMode === 'viewing' && maskData) {
-        drawMasksForFrame(currentFrame);
-    }
-}
-
-// Handle mode change
-function handleModeChange() {
-    currentMode = modeToggle.checked ? 'viewing' : 'setup';
-    updateUIState();
-    
-    // Redraw current frame with appropriate overlays
-    if (currentMode === 'setup') {
-        drawPointsForFrame(currentFrame);
-    } else if (maskData) {
-        drawMasksForFrame(currentFrame);
-    }
-}
-
-// Handle point type change
-function handlePointTypeChange() {
-    currentPointType = parseInt(pointTypeSelector.value);
-}
-
-// Handle mask opacity change
-function handleMaskOpacityChange() {
-    maskOpacity = parseFloat(maskOpacitySlider.value);
-    updateMaskColor();
-    
-    // Redraw masks if in viewing mode
-    if (currentMode === 'viewing' && maskData) {
-        drawMasksForFrame(currentFrame);
-    }
-}
-
-// Handle mask color change
-function handleMaskColorChange() {
-    updateMaskColor();
-    
-    // Redraw masks if in viewing mode
-    if (currentMode === 'viewing' && maskData) {
-        drawMasksForFrame(currentFrame);
-    }
-}
-
-// Update mask color with current opacity
-function updateMaskColor() {
-    const color = maskColorSelector.value;
-    const r = parseInt(color.substr(1, 2), 16);
-    const g = parseInt(color.substr(3, 2), 16);
-    const b = parseInt(color.substr(5, 2), 16);
-    
-    maskColor = `rgba(${r}, ${g}, ${b}, ${maskOpacity})`;
-}
-
-// Handle canvas click for point placement
-function handleCanvasClick(event) {
-    if (currentMode !== 'setup' || !canvas) return;
-    
-    const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    
-    // Add point to current frame
-    addPoint(currentFrame, x, y, currentPointType);
-    
-    // Redraw points
-    drawPointsForFrame(currentFrame);
-}
-
-// Handle canvas right-click for point removal
-function handleCanvasRightClick(event) {
-    event.preventDefault();
-    
-    if (currentMode !== 'setup' || !canvas) return;
-    
-    const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    
-    // Find and remove the closest point
-    removeClosestPoint(currentFrame, x, y);
-    
-    // Redraw points
-    drawPointsForFrame(currentFrame);
-}
-
-// Add point to frame
-function addPoint(frameIndex, x, y, label) {
-    if (!framePrompts[frameIndex]) {
-        framePrompts[frameIndex] = [];
-    }
-    
-    framePrompts[frameIndex].push({ x, y, label });
-}
-
-// Remove closest point to coordinates
-function removeClosestPoint(frameIndex, x, y) {
-    if (!framePrompts[frameIndex] || framePrompts[frameIndex].length === 0) return;
-    
-    let closestIndex = -1;
-    let minDistance = Infinity;
-    
-    for (let i = 0; i < framePrompts[frameIndex].length; i++) {
-        const point = framePrompts[frameIndex][i];
-        const distance = Math.sqrt(Math.pow(point.x - x, 2) + Math.pow(point.y - y, 2));
-        
-        if (distance < minDistance) {
-            minDistance = distance;
-            closestIndex = i;
+    // Draw points for current frame
+    objects.forEach(object => {
+        const points = object.points[currentFrame];
+        if (points) {
+            points.forEach(point => {
+                // Scale coordinates to canvas dimensions
+                const x = point.x * (canvasElement.width / videoWidth);
+                const y = point.y * (canvasElement.height / videoHeight);
+                
+                ctx.beginPath();
+                ctx.arc(x, y, 5, 0, 2 * Math.PI);
+                ctx.fillStyle = point.label === 1 ? 'rgba(0, 255, 0, 0.7)' : 'rgba(255, 0, 0, 0.7)';
+                ctx.strokeStyle = 'white';
+                ctx.fill();
+                ctx.stroke();
+            });
         }
-    }
-    
-    if (closestIndex !== -1 && minDistance < 20) { // Only remove if within 20px
-        framePrompts[frameIndex].splice(closestIndex, 1);
-    }
+    });
 }
 
-// Clear points for current frame
-function clearCurrentFramePoints() {
-    if (framePrompts[currentFrame]) {
-        framePrompts[currentFrame] = [];
-        drawPointsForFrame(currentFrame);
-    }
-}
-
-// Clear all points
-function clearAllPoints() {
-    framePrompts = {};
-    drawPointsForFrame(currentFrame);
-}
-
-// Draw points for a specific frame
-function drawPointsForFrame(frameIndex) {
-    if (!ctx || currentMode !== 'setup') return;
+// Draw masks for the current frame
+function drawMasks(frameMasks) {
+    if (!ctx) return;
     
-    // Redraw the current frame
-    ctx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+    // Create an offscreen canvas for mask composition
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = canvasElement.width;
+    maskCanvas.height = canvasElement.height;
+    const maskCtx = maskCanvas.getContext('2d');
     
-    // Draw points
-    if (framePrompts[frameIndex]) {
-        framePrompts[frameIndex].forEach(point => {
-            ctx.beginPath();
-            ctx.arc(point.x, point.y, 5, 0, 2 * Math.PI);
-            
-            if (point.label === 1) {
-                // Positive point (green)
-                ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
-                ctx.strokeStyle = 'white';
-            } else {
-                // Negative point (red)
-                ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
-                ctx.strokeStyle = 'white';
-            }
-            
-            ctx.fill();
-            ctx.stroke();
-        });
-    }
-}
-
-// Draw masks for a specific frame
-function drawMasksForFrame(frameIndex) {
-    if (!ctx || currentMode !== 'viewing' || !maskData) return;
-    
-    // Redraw the current frame
-    ctx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
-    
-    // Draw mask if available for this frame
-    if (maskData[frameIndex]) {
-        const mask = maskData[frameIndex];
-        
-        // Create a semi-transparent overlay with current color and opacity
-        ctx.fillStyle = maskColor;
-        
-        // Optimize mask rendering by using a single fill operation
-        // Create a path for all mask pixels
-        ctx.beginPath();
-        
-        // Use a more efficient approach for large masks
-        if (mask.length > 100 || mask[0].length > 100) {
-            // For large masks, use a more efficient approach
-            const imageData = ctx.createImageData(canvasElement.width, canvasElement.height);
+    // Draw each object's mask
+    objects.forEach((object, index) => {
+        if (frameMasks[object.id]) {
+            const mask = frameMasks[object.id];
+            const imageData = maskCtx.createImageData(canvasElement.width, canvasElement.height);
             const data = imageData.data;
             
-            // Set alpha channel based on mask
-            for (let y = 0; y < mask.length; y++) {
-                for (let x = 0; x < mask[y].length; x++) {
-                    if (mask[y][x] > 0) {
-                        const index = (y * canvasElement.width + x) * 4;
-                        const color = hexToRgb(maskColorSelector.value);
-                        
-                        data[index] = color.r;     // R
-                        data[index + 1] = color.g; // G
-                        data[index + 2] = color.b; // B
-                        data[index + 3] = Math.floor(maskOpacity * 255); // A
+            // Convert mask data to RGBA
+            const color = parseRGBA(object.color);
+            for (let i = 0; i < mask.length; i++) {
+                for (let j = 0; j < mask[i].length; j++) {
+                    if (mask[i][j] > 0) {
+                        const idx = (i * canvasElement.width + j) * 4;
+                        data[idx] = color.r;     // R
+                        data[idx + 1] = color.g; // G
+                        data[idx + 2] = color.b; // B
+                        data[idx + 3] = Math.floor(color.a * maskOpacity * 255); // A
                     }
                 }
             }
             
-            ctx.putImageData(imageData, 0, 0);
-        } else {
-            // For smaller masks, use the path approach
-            for (let y = 0; y < mask.length; y++) {
-                for (let x = 0; x < mask[y].length; x++) {
-                    if (mask[y][x] > 0) {
-                        ctx.rect(x, y, 1, 1);
-                    }
-                }
-            }
-            
-            ctx.fill();
+            maskCtx.putImageData(imageData, 0, 0);
         }
+    });
+    
+    // Composite mask onto main canvas
+    ctx.drawImage(maskCanvas, 0, 0);
+}
+
+// Parse RGBA color string
+function parseRGBA(rgba) {
+    const match = rgba.match(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/);
+    if (match) {
+        return {
+            r: parseInt(match[1]),
+            g: parseInt(match[2]),
+            b: parseInt(match[3]),
+            a: parseFloat(match[4])
+        };
+    }
+    return { r: 255, g: 165, b: 0, a: 0.5 }; // Default orange
+}
+
+// Handle add object button click
+function handleAddObject() {
+    const newId = objects.length + 1;
+    objects.push({
+        id: newId,
+        label: `Object ${newId}`,
+        thumbnail: null,
+        points: {},
+        color: maskColors[(newId - 1) % maskColors.length]
+    });
+    
+    currentObjectId = newId;
+    updateObjectsList();
+}
+
+// Handle start over button click
+function handleStartOver() {
+    if (confirm('Are you sure you want to start over? All points will be cleared.')) {
+        objects.forEach(obj => {
+            obj.points = {};
+            obj.thumbnail = null;
+        });
+        drawFrame();
+        updateObjectsList();
     }
 }
 
-// Helper function to convert hex color to RGB
-function hexToRgb(hex) {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return result ? {
-        r: parseInt(result[1], 16),
-        g: parseInt(result[2], 16),
-        b: parseInt(result[3], 16)
-    } : {r: 255, g: 0, b: 0}; // Default to red if parsing fails
-}
-
-// Handle process video button click
-async function handleProcessVideo() {
-    if (Object.keys(framePrompts).length === 0) {
-        alert('Please add at least one point before processing');
-        return;
-    }
+// Handle track objects button click
+async function handleTrackObjects() {
+    if (!currentVideo) return;
+    
+    // Convert points data to the format expected by the backend
+    const prompts = {};
+    objects.forEach(obj => {
+        Object.entries(obj.points).forEach(([frame, points]) => {
+            const frameIndex = parseInt(frame);
+            if (!prompts[frameIndex]) {
+                prompts[frameIndex] = [];
+            }
+            prompts[frameIndex].push(...points);
+        });
+    });
     
     try {
         isProcessing = true;
         updateUIState();
         
-        // Send prompts to backend
         const response = await fetch('/process-video', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                filename: currentVideo.filename,  // Use the unique filename from upload
-                prompts: framePrompts
+                filename: currentVideo.filename,
+                prompts: prompts
             })
         });
         
@@ -483,18 +472,11 @@ async function handleProcessVideo() {
         const data = await response.json();
         
         if (data.status === 'success') {
-            // Store mask data
-            maskData = data.masks;
+            // Store masks data
+            masks = data.masks;
             
-            // Switch to viewing mode
-            currentMode = 'viewing';
-            modeToggle.checked = true;
-            
-            // Update UI
-            updateUIState();
-            
-            // Draw masks
-            drawMasksForFrame(currentFrame);
+            // Update UI to show masks
+            drawFrame();
         } else {
             throw new Error('Processing failed: ' + data.message);
         }
@@ -507,99 +489,95 @@ async function handleProcessVideo() {
     }
 }
 
-// API Integration Functions
-async function processVideo() {
-    if (!currentVideo || !framePrompts || Object.keys(framePrompts).length === 0) {
-        showError('Please add points to at least one frame before processing.');
-        return;
-    }
-
-    try {
-        updateUIState({ processing: true });
-        const response = await fetch('/process-video', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                filename: currentVideo.name,
-                prompts: framePrompts
-            })
+// Update objects list in sidebar
+function updateObjectsList() {
+    const objectsList = document.querySelector('.objects-list');
+    objectsList.innerHTML = objects.map(obj => `
+        <div class="object-item ${obj.id === currentObjectId ? 'active' : ''}" data-id="${obj.id}">
+            <div class="object-preview">
+                ${obj.thumbnail ? `<img src="${obj.thumbnail}" alt="${obj.label}">` : ''}
+            </div>
+            <div class="object-label">${obj.label}</div>
+            <div class="object-controls">
+                <button class="add-point-btn ${currentObjectId === obj.id && currentAction === 'add' ? 'active' : ''}" 
+                        data-action="add" data-id="${obj.id}">
+                    <span class="icon">+</span> Add
+                </button>
+                <button class="remove-point-btn ${currentObjectId === obj.id && currentAction === 'remove' ? 'active' : ''}" 
+                        data-action="remove" data-id="${obj.id}">
+                    <span class="icon">-</span> Remove
+                </button>
+            </div>
+        </div>
+    `).join('');
+    
+    // Add event listeners to object controls
+    objectsList.querySelectorAll('.add-point-btn, .remove-point-btn').forEach(button => {
+        button.addEventListener('click', (e) => {
+            const action = e.target.closest('button').dataset.action;
+            const objectId = parseInt(e.target.closest('button').dataset.id);
+            
+            currentObjectId = objectId;
+            currentAction = action;
+            
+            updateObjectsList();
         });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to process video');
-        }
-
-        const result = await response.json();
-        if (result.success) {
-            await getMasks(currentVideo.name);
-            currentMode = 'viewing';
-            updateUIState({ mode: currentMode });
-            showSuccess('Video processed successfully!');
-        } else {
-            throw new Error(result.error || 'Failed to process video');
-        }
-    } catch (error) {
-        showError(error.message);
-        console.error('Error processing video:', error);
-    } finally {
-        updateUIState({ processing: false });
-    }
+    });
 }
 
-async function getMasks(filename) {
-    try {
-        const response = await fetch(`/get-masks/${filename}`);
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to retrieve masks');
-        }
-
-        const result = await response.json();
-        if (result.success) {
-            maskData = result.masks;
-            drawFrame(currentFrameIndex);
-        } else {
-            throw new Error(result.error || 'Failed to retrieve masks');
-        }
-    } catch (error) {
-        showError(error.message);
-        console.error('Error retrieving masks:', error);
-    }
+// Update object thumbnail
+function updateObjectThumbnail(objectId) {
+    const object = objects.find(obj => obj.id === objectId);
+    if (!object) return;
+    
+    // Create a temporary canvas for the thumbnail
+    const thumbCanvas = document.createElement('canvas');
+    thumbCanvas.width = 64;
+    thumbCanvas.height = 64;
+    const thumbCtx = thumbCanvas.getContext('2d');
+    
+    // Draw current frame
+    thumbCtx.drawImage(videoElement, 0, 0, 64, 64);
+    
+    // Store thumbnail
+    object.thumbnail = thumbCanvas.toDataURL();
+    
+    // Update objects list to show new thumbnail
+    updateObjectsList();
 }
 
-// UI Feedback Functions
-function showError(message) {
-    const errorDiv = document.createElement('div');
-    errorDiv.className = 'error-message';
-    errorDiv.textContent = message;
-    document.body.appendChild(errorDiv);
-    setTimeout(() => errorDiv.remove(), 5000);
+// Format time as MM:SS
+function formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-function showSuccess(message) {
-    const successDiv = document.createElement('div');
-    successDiv.className = 'success-message';
-    successDiv.textContent = message;
-    document.body.appendChild(successDiv);
-    setTimeout(() => successDiv.remove(), 5000);
+// Reset state for new video
+function resetState() {
+    currentFrame = 0;
+    isPlaying = false;
+    objects = [{
+        id: 1,
+        label: 'Object 1',
+        thumbnail: null,
+        points: {},
+        color: maskColors[0]
+    }];
+    currentObjectId = 1;
+    currentAction = 'add';
+    
+    updateObjectsList();
 }
 
-// Update UI state based on current mode and processing state
+// Update UI state based on processing state
 function updateUIState() {
-    // Disable controls during processing
     const controls = [
-        frameSlider, 
-        playPauseBtn, 
-        modeToggle, 
-        pointTypeSelector, 
-        processVideoBtn, 
-        clearPointsBtn, 
-        clearAllPointsBtn,
-        maskOpacitySlider,
-        maskColorSelector
+        playPauseBtn,
+        frameSlider,
+        addObjectBtn,
+        startOverBtn,
+        trackObjectsBtn
     ];
     
     controls.forEach(control => {
@@ -608,50 +586,15 @@ function updateUIState() {
         }
     });
     
-    // Show/hide elements based on mode
-    if (pointTypeSelector) {
-        pointTypeSelector.parentElement.style.display = currentMode === 'setup' ? 'block' : 'none';
-    }
+    document.querySelectorAll('.add-point-btn, .remove-point-btn').forEach(btn => {
+        btn.disabled = isProcessing;
+    });
     
-    if (processVideoBtn) {
-        processVideoBtn.style.display = currentMode === 'setup' ? 'block' : 'none';
+    if (isProcessing) {
+        canvasElement.style.opacity = '0.7';
+    } else {
+        canvasElement.style.opacity = '1';
     }
-    
-    if (clearPointsBtn) {
-        clearPointsBtn.style.display = currentMode === 'setup' ? 'block' : 'none';
-    }
-    
-    if (clearAllPointsBtn) {
-        clearAllPointsBtn.style.display = currentMode === 'setup' ? 'block' : 'none';
-    }
-    
-    // Show/hide mask controls based on mode and mask data
-    if (maskOpacitySlider && maskColorSelector) {
-        const maskControls = document.getElementById('mask-controls');
-        if (maskControls) {
-            maskControls.style.display = (currentMode === 'viewing' && maskData) ? 'block' : 'none';
-        }
-    }
-    
-    // Update canvas cursor based on mode
-    if (canvas) {
-        canvas.style.cursor = currentMode === 'setup' ? 'crosshair' : 'default';
-    }
-}
-
-// Reset state for new video
-function resetState() {
-    currentFrame = 0;
-    isPlaying = false;
-    currentMode = 'setup';
-    framePrompts = {};
-    maskData = null;
-    
-    if (modeToggle) {
-        modeToggle.checked = false;
-    }
-    
-    updateUIState();
 }
 
 // Call init when the DOM is loaded
