@@ -4,15 +4,17 @@
 
 1. Backend:
    - Python with aiohttp for async web server
-   - SAM2 model integration for image and video segmentation
+   - Direct SAM2 model integration (no wrapper class)
    - GPU support for model inference
-   - Video file upload and processing capabilities
+   - Video file upload (js and aiohttp) and processing (decord and SAM2)
+   - Point-based prompting only
 
 2. Frontend:
    - Native HTML5, JavaScript, and CSS (no frameworks)
-   - Image and video upload interface
-   - Interactive segmentation interface similar to SAM2 demo
-   - Real-time visualization of segmentation results
+   - Video upload interface
+   - Interactive point-based segmentation interface
+   - Real-time visualization using OpenCV.js
+   - Canvas-based video display and interaction
 
 3. Containerization:
    - Docker container with GPU support
@@ -25,45 +27,52 @@
 - [ ] Create project directory structure
 - [ ] Set up Docker configuration with GPU support
 - [ ] Create requirements.txt with necessary Python dependencies
+  - [ ] aiohttp
+  - [ ] decord
+  - [ ] torch
+  - [ ] torchvision
+  - [ ] SAM2 dependencies
 - [ ] Set up basic aiohttp server structure
 
 ### 2. Backend Development
-- [ ] Implement SAM2 model integration
-  - [ ] Download and integrate SAM2 model weights
-  - [ ] Create model wrapper class for easy inference
-  - [ ] Implement GPU-accelerated inference
+- [ ] Implement direct SAM2 model integration
+  - [ ] Download SAM2.1 Hiera Large model weights
+  - [ ] Set up model initialization and GPU configuration
+  - [ ] Implement point-based inference pipeline
 - [ ] Develop API endpoints
-  - [ ] File upload endpoint for images/videos
-  - [ ] Segmentation endpoint for processing
-  - [ ] Status endpoint for long-running operations
+  - [ ] Video upload endpoint
+  - [ ] Point prompt processing endpoint
+  - [ ] Frame extraction endpoint using decord
 - [ ] Implement video processing pipeline
-  - [ ] Video frame extraction
+  - [ ] Video frame extraction with decord
   - [ ] Frame-by-frame segmentation
-  - [ ] Result aggregation
+  - [ ] Result aggregation and response formatting
 
 ### 3. Frontend Development
 - [ ] Create basic HTML structure
-  - [ ] Upload interface
-  - [ ] Canvas for image/video display
-  - [ ] Controls for segmentation
+  - [ ] Video upload interface
+  - [ ] Canvas for video display
+  - [ ] Point selection interface
 - [ ] Implement JavaScript functionality
-  - [ ] File upload handling
-  - [ ] Canvas drawing and interaction
-  - [ ] API communication
-  - [ ] Real-time visualization
+  - [ ] Video upload handling
+  - [ ] OpenCV.js integration for image processing
+  - [ ] Canvas point selection and interaction
+  - [ ] API communication for segmentation
+  - [ ] Real-time mask visualization
 - [ ] Style with CSS
   - [ ] Basic responsive layout
-  - [ ] Interactive elements styling
+  - [ ] Point selection UI elements
   - [ ] Loading states and feedback
 
 ### 4. SAM2 Integration
-- [ ] Implement image segmentation
-  - [ ] Point/box prompt handling
-  - [ ] Mask generation and visualization
-- [ ] Implement video segmentation
-  - [ ] Frame tracking
-  - [ ] Multi-object support
-  - [ ] Real-time processing
+- [ ] Implement point-based segmentation
+  - [ ] Point prompt handling
+  - [ ] Mask generation
+  - [ ] Real-time visualization
+- [ ] Implement video frame processing
+  - [ ] Frame extraction with decord
+  - [ ] Frame-by-frame segmentation
+  - [ ] Result visualization
 
 ### 5. Containerization
 - [ ] Create Dockerfile
@@ -72,14 +81,13 @@
   - [ ] SAM2 model installation
   - [ ] Application deployment
 - [ ] Configure GPU access
-- [ ] Set up volume mounts for data persistence
+- [ ] Set up volume mounts for video storage
 
 ### 6. Testing and Optimization
-- [ ] Test image segmentation
-- [ ] Test video processing
+- [ ] Test video processing pipeline
 - [ ] Performance optimization
   - [ ] GPU utilization
-  - [ ] Memory management
+  - [ ] Memory management for video frames
   - [ ] Response time optimization
 
 ### 7. Documentation
@@ -90,19 +98,23 @@
 
 ## Technical Considerations
 
-1. Model Selection:
-   - Use SAM2.1 Hiera Large model for best performance
-   - Consider model size vs. performance trade-offs
+1. Model and Processing:
+   - Direct SAM2.1 Hiera Large model usage
+   - decord for efficient video frame extraction
+   - OpenCV.js for frontend image processing
+   - Point-based prompting only
 
 2. Performance Optimization:
-   - Implement batch processing for video frames
-   - Use WebSocket for real-time updates
+   - Efficient frame extraction with decord
+   - WebSocket for real-time updates
    - Optimize memory usage for video processing
+   - Batch processing of frames when possible
 
 3. User Experience:
-   - Provide clear feedback during processing
-   - Implement progressive loading for large files
-   - Add error handling and recovery
+   - Clear point selection interface
+   - Real-time mask visualization
+   - Progressive video loading
+   - Error handling and recovery
 
 4. Future Thermal Camera Integration:
    - Design with thermal video processing in mind
