@@ -4,7 +4,6 @@ import os
 import logging
 import json
 from pathlib import Path
-import decord
 import numpy as np
 from datetime import datetime
 import cv2
@@ -25,7 +24,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # Initialize SAM2 model
 MODEL_CONFIG = "configs/sam2.1/sam2.1_hiera_l.yaml"
-MODEL_CHECKPOINT = "checkpoints/sam2.1_hiera_large.pt"
+MODEL_CHECKPOINT = "data/models/sam2.1_hiera_large.pt"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Global variables for SAM2
@@ -67,22 +66,29 @@ async def handle_upload(request):
                     break
                 f.write(chunk)
         
-        # Verify video can be opened with decord
+        # Initialize SAM2 if not already done
+        if predictor is None:
+            await init_sam2()
+        
+        # Load video with SAM2 to get properties
         try:
-            vr = decord.VideoReader(str(filepath))
-            logger.info(f"Video loaded successfully: {filename}")
-            logger.info(f"Video properties: {vr.shape}, {vr.fps} fps, {len(vr)} frames")
+            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+                current_state = predictor.init_state(str(filepath))
+                video_info = predictor.get_video_info()
+                logger.info(f"Video loaded successfully: {filename}")
+                logger.info(f"Video properties: {video_info}")
         except Exception as e:
-            logger.error(f"Error loading video with decord: {str(e)}")
+            logger.error(f"Error loading video with SAM2: {str(e)}")
             filepath.unlink()  # Delete invalid video file
             return web.Response(text=f'Invalid video file: {str(e)}', status=400)
                 
         return web.json_response({
             'status': 'success',
             'filename': filename,
-            'frames': len(vr),
-            'fps': float(vr.fps),
-            'shape': vr.shape
+            'frames': video_info['num_frames'],
+            'fps': video_info['fps'],
+            'width': video_info['width'],
+            'height': video_info['height']
         })
     except Exception as e:
         logger.error(f"Error handling upload: {str(e)}")
@@ -109,17 +115,10 @@ async def handle_point_prompt(request):
         if None in (x, y, frame):
             return web.Response(text='Missing required parameters', status=400)
             
-        # Load the specific frame
-        vr = decord.VideoReader(str(video_path))
-        frame_idx = int(frame * vr.fps)  # Convert time to frame index
-        frame_idx = min(max(0, frame_idx), len(vr) - 1)  # Ensure valid frame index
-        
-        frame_data = vr[frame_idx].asnumpy()
-        
         # Initialize state if needed
         if current_state is None:
             with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-                current_state = predictor.init_state(frame_data)
+                current_state = predictor.init_state(str(video_path))
         
         # Process point with SAM2
         with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
@@ -132,9 +131,8 @@ async def handle_point_prompt(request):
             # Add point and get masks
             frame_idx, object_ids, masks = predictor.add_new_points_or_box(current_state, point_prompt)
             
-            # Apply mask to frame
-            result = frame_data.copy()
-            result[masks[0] > 0] = [255, 0, 0]  # Highlight segmented area in red
+            # Get the frame with masks applied
+            result = predictor.get_frame_with_masks(frame_idx)
             
             # Convert result to base64
             _, buffer = cv2.imencode('.jpg', cv2.cvtColor(result, cv2.COLOR_RGB2BGR))
@@ -168,28 +166,15 @@ async def handle_frame_extraction(request):
         if frame is None:
             return web.Response(text='Missing frame parameter', status=400)
             
-        # Load the specific frame
-        vr = decord.VideoReader(str(video_path))
-        frame_idx = int(frame * vr.fps)  # Convert time to frame index
-        frame_idx = min(max(0, frame_idx), len(vr) - 1)  # Ensure valid frame index
-        
-        frame_data = vr[frame_idx].asnumpy()
-        
         # Initialize state if needed
         if current_state is None:
             with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-                current_state = predictor.init_state(frame_data)
+                current_state = predictor.init_state(str(video_path))
         
         # Process frame with SAM2
         with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-            # Propagate masks to current frame
-            for curr_frame_idx, curr_object_ids, curr_masks in predictor.propagate_in_video(current_state):
-                if curr_frame_idx == frame_idx:
-                    # Apply masks to frame
-                    result = frame_data.copy()
-                    for mask in curr_masks:
-                        result[mask > 0] = [255, 0, 0]  # Highlight segmented areas in red
-                    break
+            # Get the frame with masks applied
+            result = predictor.get_frame_with_masks(frame)
             
             # Convert frame to base64 for sending to frontend
             _, buffer = cv2.imencode('.jpg', cv2.cvtColor(result, cv2.COLOR_RGB2BGR))
@@ -197,7 +182,7 @@ async def handle_frame_extraction(request):
             
             return web.json_response({
                 'status': 'success',
-                'frame': frame_idx,
+                'frame': frame,
                 'frame_data': frame_base64
             })
             
