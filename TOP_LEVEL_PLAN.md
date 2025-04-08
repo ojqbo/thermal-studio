@@ -53,26 +53,32 @@
   - [ ] Video upload interface
   - [ ] Canvas for video display
   - [ ] Point selection interface
+  - [ ] Thermal histogram visualization panel
 - [ ] Implement JavaScript functionality
   - [ ] Video upload handling
   - [ ] OpenCV.js integration for image processing
   - [ ] Canvas point selection and interaction
   - [ ] API communication for segmentation
   - [ ] Real-time mask visualization
+  - [ ] RGB to grayscale conversion for thermal data
+  - [ ] Histogram generation and display
 - [ ] Style with CSS
   - [ ] Basic responsive layout
   - [ ] Point selection UI elements
   - [ ] Loading states and feedback
+  - [ ] Histogram panel styling
 
 ### 4. SAM2 Integration
 - [ ] Implement point-based segmentation
   - [ ] Point prompt handling
   - [ ] Mask generation
   - [ ] Real-time visualization
+  - [ ] Mask-based thermal data extraction
 - [ ] Implement video frame processing
   - [ ] Frame extraction with decord
   - [ ] Frame-by-frame segmentation
   - [ ] Result visualization
+  - [ ] Per-frame thermal histogram generation
 
 ### 5. Containerization
 - [ ] Create Dockerfile
@@ -113,10 +119,13 @@
 3. User Experience:
    - Clear point selection interface
    - Real-time mask visualization
-   - Progressive video loading
    - Error handling and recovery
 
 4. Future Thermal Camera Integration:
    - Design with thermal video processing in mind
    - Consider temperature data visualization
-   - Plan for thermal-specific segmentation features 
+   - RGB to grayscale conversion for thermal data
+   - Histogram generation for segmented regions
+   - Real-time histogram updates per frame
+   - Per-object thermal statistics tracking
+   - Efficient histogram computation using OpenCV.js 
