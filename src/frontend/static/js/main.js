@@ -393,9 +393,33 @@ class ObjectManager {
 
     startOver() {
         if (confirm('Are you sure you want to start over? All points will be cleared.')) {
+            // Clear all objects, points, and masks
             this.state.objects = {};
-            this.state.reset();
+            this.state.masks = {};
+            this.state.currentFrame = 0;
+            this.state.isPlaying = false;
+            
+            // Reset to initial state with one object
+            this.state.currentObjectId = 1;
+            this.state.currentAction = 'add';
+            
+            // Create initial object
+            this.state.objects[this.state.currentObjectId] = {
+                id: this.state.currentObjectId,
+                label: 'Object 1',
+                points: [],
+                masks: [],
+                color: MASK_COLORS[0]
+            };
+            
+            // Update UI
             this.ui.updateObjectsList();
+            
+            // Reset video to beginning if it exists
+            if (this.state.videoElement) {
+                this.state.videoElement.currentTime = 0;
+                this.videoManager.drawFrame();
+            }
         }
     }
 
