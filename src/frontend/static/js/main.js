@@ -389,6 +389,11 @@ class ObjectManager {
     setActiveObject(objectId) {
         this.state.currentObjectId = objectId;
         this.ui.updateObjectsList();
+        
+        // Also update the inspection mode objects list if we're in inspection mode
+        if (this.isInspectionMode) {
+            this.updateInspectionObjectsList();
+        }
     }
 
     addObject() {
@@ -993,6 +998,15 @@ class Application {
         document.querySelector('.objects-list').addEventListener('click', (e) => {
             const objectItem = e.target.closest('.object-item');
             if (objectItem && !e.target.closest('.remove-object-btn')) {
+                const objectId = parseInt(objectItem.dataset.id);
+                this.objectManager.setActiveObject(objectId);
+            }
+        });
+        
+        // Add click handler for inspection mode object items
+        document.querySelector('#inspection-sidebar .objects-list').addEventListener('click', (e) => {
+            const objectItem = e.target.closest('.object-item');
+            if (objectItem) {
                 const objectId = parseInt(objectItem.dataset.id);
                 this.objectManager.setActiveObject(objectId);
             }
