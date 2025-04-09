@@ -228,6 +228,11 @@ class VideoManager {
         if (!this.state.ctx || !this.state.masks[this.state.currentFrame]) return;
         
         const frameMasks = this.state.masks[this.state.currentFrame];
+        console.log('Drawing masks for frame', this.state.currentFrame, {
+            objects: Object.keys(frameMasks).length,
+            objectIds: Object.keys(frameMasks)
+        });
+        
         const maskCanvas = document.createElement('canvas');
         maskCanvas.width = this.state.canvasElement.width;
         maskCanvas.height = this.state.canvasElement.height;
@@ -239,7 +244,17 @@ class VideoManager {
         // Process each object's mask
         Object.entries(frameMasks).forEach(([objectId, mask]) => {
             const object = this.state.objects[objectId];
-            if (!object) return;
+            if (!object) {
+                console.warn(`No object found for ID ${objectId}`);
+                return;
+            }
+            
+            console.log(`Processing mask for object ${objectId}:`, {
+                maskType: Array.isArray(mask) ? 'array' : typeof mask,
+                maskLength: Array.isArray(mask) ? mask.length : 'N/A',
+                firstElement: Array.isArray(mask) && mask.length > 0 ? 
+                    (Array.isArray(mask[0]) ? 'array' : typeof mask[0]) : 'N/A'
+            });
             
             const color = this.parseRGBA(object.color);
             
@@ -251,7 +266,7 @@ class VideoManager {
                     // Case 1: 3D array [num_objects, height, width]
                     console.log("Processing 3D mask array format");
                     // Get the mask for this object index (objectId - 1 because objectId is 1-based)
-                    const objectIndex = parseInt(objectId) - 1;
+                    const objectIndex = parseInt(objectId) - 1;  // Convert to 0-based index
                     maskData = mask[objectIndex] || mask[0];
                     maskHeight = maskData.length;
                     maskWidth = maskData[0].length;
@@ -436,6 +451,7 @@ class ObjectManager {
         });
         
         await this.processFrame();
+        this.videoManager.drawFrame();  // Ensure the frame is redrawn after processing
     }
 
     async processFrame() {
@@ -447,10 +463,12 @@ class ObjectManager {
                     x: point.x,
                     y: point.y,
                     label: point.label,
-                    obj_id: point.obj_id
+                    obj_id: point.obj_id - 1  // Convert to 0-based index for backend
                 })));
             }
         }
+        
+        console.log('Sending points to backend:', framePoints);
         
         try {
             const response = await fetch('/process-frame', {
@@ -469,13 +487,40 @@ class ObjectManager {
             }
             
             const result = await response.json();
+            console.log('Received mask result:', result);
             
             if (result.masks) {
                 if (!this.state.masks[this.state.currentFrame]) {
                     this.state.masks[this.state.currentFrame] = {};
                 }
                 
-                this.state.masks[this.state.currentFrame][this.state.currentObjectId] = result.masks;
+                // Store masks for all objects
+                if (Array.isArray(result.masks) && result.masks.length > 0) {
+                    // If it's a 3D array [num_objects, height, width]
+                    if (Array.isArray(result.masks[0]) && Array.isArray(result.masks[0][0])) {
+                        console.log('Processing 3D mask array with shape:', [
+                            result.masks.length,
+                            result.masks[0].length,
+                            result.masks[0][0].length
+                        ]);
+                        // Store each object's mask
+                        for (let i = 0; i < result.masks.length; i++) {
+                            const objectId = i + 1; // Convert to 1-based index for frontend
+                            this.state.masks[this.state.currentFrame][objectId] = result.masks;
+                            console.log(`Stored mask for object ${objectId}`);
+                        }
+                    } else {
+                        console.log('Processing 2D mask array with shape:', [
+                            result.masks.length,
+                            result.masks[0].length
+                        ]);
+                        // If it's a 2D array [height, width], store it for the current object
+                        this.state.masks[this.state.currentFrame][this.state.currentObjectId] = result.masks;
+                        console.log(`Stored mask for current object ${this.state.currentObjectId}`);
+                    }
+                }
+                
+                console.log('Current frame masks:', this.state.masks[this.state.currentFrame]);
                 this.videoManager.drawFrame();
             }
         } catch (error) {
@@ -494,10 +539,12 @@ class ObjectManager {
                     x: point.x,
                     y: point.y,
                     label: point.label,
-                    obj_id: point.obj_id
+                    obj_id: point.obj_id - 1  // Convert to 0-based index for backend
                 })));
             }
         }
+        
+        console.log('Sending video processing request with prompts:', prompts);
         
         try {
             this.state.isProcessing = true;
@@ -519,9 +566,38 @@ class ObjectManager {
             }
             
             const data = await response.json();
+            console.log('Received video processing result:', data);
             
             if (data.status === 'success') {
-                this.state.masks = data.masks;
+                // Initialize masks for all frames
+                this.state.masks = {};
+                
+                // Process masks for each frame
+                Object.entries(data.masks).forEach(([frameIdx, frameMasks]) => {
+                    this.state.masks[frameIdx] = {};
+                    
+                    // If it's a 3D array [num_objects, height, width]
+                    if (Array.isArray(frameMasks) && frameMasks.length > 0 && 
+                        Array.isArray(frameMasks[0]) && Array.isArray(frameMasks[0][0])) {
+                        
+                        console.log(`Processing frame ${frameIdx} masks with shape:`, [
+                            frameMasks.length,
+                            frameMasks[0].length,
+                            frameMasks[0][0].length
+                        ]);
+                        
+                        // Store each object's mask
+                        for (let i = 0; i < frameMasks.length; i++) {
+                            const objectId = i + 1; // Convert to 1-based index for frontend
+                            this.state.masks[frameIdx][objectId] = frameMasks;
+                            console.log(`Stored mask for object ${objectId} in frame ${frameIdx}`);
+                        }
+                    } else {
+                        console.warn(`Unexpected mask format for frame ${frameIdx}:`, frameMasks);
+                    }
+                });
+                
+                console.log('Processed all frame masks:', this.state.masks);
                 this.videoManager.drawFrame();
             } else {
                 throw new Error('Processing failed: ' + data.message);
@@ -667,7 +743,11 @@ class Application {
         this.ui.elements.playPauseBtn.addEventListener('click', () => this.videoManager.togglePlayPause());
         this.ui.elements.frameSlider.addEventListener('input', (e) => {
             if (this.state.videoElement) {
-                this.state.videoElement.currentTime = e.target.value / this.state.fps;
+                const frameValue = parseInt(e.target.value);
+                this.state.currentFrame = frameValue;
+                this.state.videoElement.currentTime = frameValue / this.state.fps;
+                this.videoManager.drawFrame();
+                this.ui.elements.frameDisplay.textContent = this.videoManager.formatTime(this.state.videoElement.currentTime);
             }
         });
         

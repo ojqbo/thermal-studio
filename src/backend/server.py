@@ -290,7 +290,7 @@ async def process_video_with_prompts(sam2_predictor) -> List[tuple[int, np.ndarr
             start_frame_idx=0
         ):
         masks = masks.detach().cpu().numpy()
-        masks = masks[0]  # Remove batch dimension
+        masks = masks[:, 0]  # Remove batch dimension
         masks = (masks > 0).astype(np.uint8)
         yield frame_idx, masks
 
