@@ -26,14 +26,8 @@ let maskColors = [
 ];
 
 // Object tracking state
-let objects = [{
-    id: 1,
-    label: 'Object 1',
-    thumbnail: null,
-    points: {}, // {frameIndex: [{x, y, label}]}
-    color: maskColors[0]
-}];
-let currentObjectId = 1;
+let objects = {};  // Changed from array to object for easier access
+let currentObjectId = null;
 let currentAction = 'add'; // 'add' or 'remove'
 
 // DOM elements
@@ -238,167 +232,209 @@ async function loadVideo(filename) {
 
 // Handle canvas click for point placement
 async function handleCanvasClick(event) {
-    event.preventDefault();
-    
-    if (!videoElement || isProcessing) return;
+    if (!videoElement) return;
     
     const rect = canvasElement.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     
-    // Scale coordinates to actual video dimensions
-    const scaleX = videoWidth / canvasElement.width;
-    const scaleY = videoHeight / canvasElement.height;
+    // Scale coordinates to video dimensions
+    const scaleX = videoWidth / rect.width;
+    const scaleY = videoHeight / rect.height;
+    const scaledX = x * scaleX;
+    const scaledY = y * scaleY;
     
-    const point = {
-        x: x * scaleX,
-        y: y * scaleY,
-        label: currentAction === 'add' ? 1 : 0
-    };
+    // Create a new object if none exists
+    if (currentObjectId === null) {
+        // Use sequential IDs starting from 1
+        currentObjectId = Object.keys(objects).length + 1;
+        objects[currentObjectId] = {
+            id: currentObjectId,
+            label: `Object ${currentObjectId}`,
+            points: [],  // Initialize points as an empty array
+            masks: [],
+            color: maskColors[(currentObjectId - 1) % maskColors.length]
+        };
+    }
     
-    // Add point to current object
-    const currentObject = objects.find(obj => obj.id === currentObjectId);
-    if (currentObject) {
-        if (!currentObject.points[currentFrame]) {
-            currentObject.points[currentFrame] = [];
+    // Ensure points is an array
+    if (!Array.isArray(objects[currentObjectId].points)) {
+        objects[currentObjectId].points = [];
+    }
+    
+    // Add point to current object with label 1 (positive point)
+    objects[currentObjectId].points.push({
+        x: scaledX,
+        y: scaledY,
+        label: 1,  // Always 1 for positive points
+        obj_id: currentObjectId  // Sequential ID starting from 1
+    });
+    
+    if (DEBUG) {
+        console.log(`Added positive point with label 1 to object ${currentObjectId}`);
+    }
+    
+    // Collect all points for current frame
+    const framePoints = [];
+    for (const objId in objects) {
+        const obj = objects[objId];
+        if (Array.isArray(obj.points)) {
+            framePoints.push(...obj.points.map(point => ({
+                x: point.x,
+                y: point.y,
+                label: point.label,
+                obj_id: point.obj_id
+            })));
         }
-        currentObject.points[currentFrame].push(point);
+    }
+    
+    console.log('Sending points to server:', framePoints);
+    
+    try {
+        const response = await fetch('/process-frame', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                frame_idx: currentFrame,
+                prompts: framePoints
+            })
+        });
         
-        // Update thumbnail if this is the first point
-        if (!currentObject.thumbnail) {
-            updateObjectThumbnail(currentObject.id);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        try {
-            isProcessing = true;
-            updateUIState();
-            
-            console.log(`Sending point to /process-frame: ${JSON.stringify(point)}`);
-            
-            // Call process_frame_with_prompts endpoint
-            const response = await fetch('/process-frame', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    frame_idx: currentFrame,
-                    prompts: point
-                })
-            });
-            
-            if (!response.ok) {
-                throw new Error(`Frame processing failed: ${await response.text()}`);
+        const result = await response.json();
+        console.log('Received mask result:', result);
+        
+        if (result.masks) {
+            // Initialize masks for current frame if not exists
+            if (!masks[currentFrame]) {
+                masks[currentFrame] = {};
             }
             
-            const result = await response.json();
-            console.log('Received mask from /process-frame:', result);
+            // Store the mask data for the current object
+            masks[currentFrame][currentObjectId] = result.masks;
             
-            // Log the raw mask data
-            console.log('Raw mask data:', JSON.stringify(result.masks).substring(0, 500) + '...');
-            
-            // Update masks for current frame
-            if (result.status === 'success' && result.masks) {
-                if (!masks[currentFrame]) {
-                    masks[currentFrame] = {};
-                }
-                
-                // Check if the mask data is valid
-                let maskData = result.masks;
-                
-                // If the mask data is empty or all zeros, create a test mask
-                if (!maskData || (Array.isArray(maskData) && maskData.length > 0 && 
-                    (maskData.every(val => val === 0) || 
-                     (Array.isArray(maskData[0]) && maskData[0].every(val => val === 0))))) {
-                    console.log("Creating test mask because server returned empty or zero mask");
-                    
-                    // Create a test mask in the center of the canvas
-                    const testMask = [];
-                    const centerX = Math.floor(videoWidth / 2);
-                    const centerY = Math.floor(videoHeight / 2);
-                    const radius = Math.min(videoWidth, videoHeight) / 4;
-                    
-                    for (let i = 0; i < videoHeight; i++) {
-                        testMask[i] = [];
-                        for (let j = 0; j < videoWidth; j++) {
-                            const distance = Math.sqrt(Math.pow(i - centerY, 2) + Math.pow(j - centerX, 2));
-                            testMask[i][j] = distance < radius ? 1 : 0;
-                        }
-                    }
-                    
-                    maskData = testMask;
-                }
-                
-                // Store the mask data
-                masks[currentFrame][currentObject.id] = maskData;
-                
-                // Log the mask data for debugging
-                console.log(`Updated masks for frame ${currentFrame}, object ${currentObject.id}:`, {
-                    type: typeof maskData,
-                    isArray: Array.isArray(maskData),
-                    length: maskData.length,
-                    sample: Array.isArray(maskData) ? 
-                        (Array.isArray(maskData[0]) ? 
-                            maskData.slice(0, 3).map(row => row.slice(0, 3)) : 
-                            maskData.slice(0, 10)) : 
-                        'not an array'
+            if (DEBUG) {
+                console.log('Stored mask data:', {
+                    frame: currentFrame,
+                    objectId: currentObjectId,
+                    maskDimensions: result.masks.length + 'x' + (result.masks[0] ? result.masks[0].length : 'unknown')
                 });
-                
-                // Force a redraw to show the mask
-                drawFrame();
-            } else {
-                console.error('Error in response:', result);
             }
-        } catch (error) {
-            console.error('Error processing frame:', error);
-            alert('Error processing frame: ' + error.message);
-        } finally {
-            isProcessing = false;
-            updateUIState();
+            
+            drawFrame();  // Redraw frame with new mask
         }
+    } catch (error) {
+        console.error('Error processing frame:', error);
     }
 }
 
 // Handle canvas right click for point removal
-function handleCanvasRightClick(event) {
+async function handleCanvasRightClick(event) {
     event.preventDefault();
     
-    if (!videoElement || isProcessing) return;
+    if (!videoElement) return;
     
     const rect = canvasElement.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     
-    // Scale coordinates to actual video dimensions
-    const scaleX = videoWidth / canvasElement.width;
-    const scaleY = videoHeight / canvasElement.height;
-    const clickX = x * scaleX;
-    const clickY = y * scaleY;
+    // Scale coordinates to video dimensions
+    const scaleX = videoWidth / rect.width;
+    const scaleY = videoHeight / rect.height;
+    const scaledX = x * scaleX;
+    const scaledY = y * scaleY;
     
-    // Find and remove the closest point within 10 pixels
-    const currentObject = objects.find(obj => obj.id === currentObjectId);
-    if (currentObject && currentObject.points[currentFrame]) {
-        const points = currentObject.points[currentFrame];
-        let closestIndex = -1;
-        let minDistance = 10;
-        
-        points.forEach((point, index) => {
-            const distance = Math.sqrt(
-                Math.pow(point.x - clickX, 2) + Math.pow(point.y - clickY, 2)
-            );
-            if (distance < minDistance) {
-                minDistance = distance;
-                closestIndex = index;
-            }
+    // Create a new object if none exists
+    if (currentObjectId === null) {
+        // Use sequential IDs starting from 1
+        currentObjectId = Object.keys(objects).length + 1;
+        objects[currentObjectId] = {
+            id: currentObjectId,
+            label: `Object ${currentObjectId}`,
+            points: [],  // Initialize points as an empty array
+            masks: [],
+            color: maskColors[(currentObjectId - 1) % maskColors.length]
+        };
+    }
+    
+    // Ensure points is an array
+    if (!Array.isArray(objects[currentObjectId].points)) {
+        objects[currentObjectId].points = [];
+    }
+    
+    // Add negative point with label 0 to current object
+    objects[currentObjectId].points.push({
+        x: scaledX,
+        y: scaledY,
+        label: 0,  // Always 0 for negative points
+        obj_id: currentObjectId  // Sequential ID starting from 1
+    });
+    
+    if (DEBUG) {
+        console.log(`Added negative point with label 0 to object ${currentObjectId}`);
+    }
+    
+    // Collect all points for current frame
+    const framePoints = [];
+    for (const objId in objects) {
+        const obj = objects[objId];
+        if (Array.isArray(obj.points)) {
+            framePoints.push(...obj.points.map(point => ({
+                x: point.x,
+                y: point.y,
+                label: point.label,  // This will be 0 for negative points
+                obj_id: point.obj_id
+            })));
+        }
+    }
+    
+    console.log('Sending points to server:', framePoints);
+    
+    try {
+        const response = await fetch('/process-frame', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                frame_idx: currentFrame,
+                prompts: framePoints
+            })
         });
         
-        if (closestIndex !== -1) {
-            points.splice(closestIndex, 1);
-            if (points.length === 0) {
-                delete currentObject.points[currentFrame];
-            }
-            drawFrame();
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
+        
+        const result = await response.json();
+        console.log('Received mask result:', result);
+        
+        if (result.masks) {
+            // Initialize masks for current frame if not exists
+            if (!masks[currentFrame]) {
+                masks[currentFrame] = {};
+            }
+            
+            // Store the mask data for the current object
+            masks[currentFrame][currentObjectId] = result.masks;
+            
+            if (DEBUG) {
+                console.log('Stored mask data:', {
+                    frame: currentFrame,
+                    objectId: currentObjectId,
+                    maskDimensions: result.masks.length + 'x' + (result.masks[0] ? result.masks[0].length : 'unknown')
+                });
+            }
+            
+            drawFrame();  // Redraw frame with new mask
+        }
+    } catch (error) {
+        console.error('Error processing frame:', error);
     }
 }
 
@@ -470,22 +506,53 @@ function drawFrame() {
     }
     
     // Draw points for current frame
-    objects.forEach(object => {
-        const points = object.points[currentFrame];
-        if (points) {
-            points.forEach(point => {
-                // Scale coordinates to canvas dimensions
-                const x = point.x * (canvasElement.width / videoWidth);
-                const y = point.y * (canvasElement.height / videoHeight);
-                
-                ctx.beginPath();
-                ctx.arc(x, y, 5, 0, 2 * Math.PI);
-                ctx.fillStyle = point.label === 1 ? 'rgba(0, 255, 0, 0.7)' : 'rgba(255, 0, 0, 0.7)';
-                ctx.strokeStyle = 'white';
-                ctx.fill();
-                ctx.stroke();
+    Object.values(objects).forEach(object => {
+        // Ensure points is an array
+        const points = Array.isArray(object.points) ? object.points : [];
+        
+        if (DEBUG) {
+            console.log(`Drawing points for object ${object.id}:`, {
+                pointsCount: points.length,
+                points: points
             });
         }
+        
+        points.forEach(point => {
+            if (!point || typeof point.x !== 'number' || typeof point.y !== 'number') {
+                console.warn('Invalid point data:', point);
+                return;
+            }
+            
+            // Scale coordinates to canvas dimensions
+            const x = point.x * (canvasElement.width / videoWidth);
+            const y = point.y * (canvasElement.height / videoHeight);
+            
+            // Determine point color based on label
+            let fillColor;
+            if (point.label === 0) {
+                // Negative points (background) are red
+                fillColor = 'rgba(255, 0, 0, 0.7)';
+            } else {
+                // Positive points use the object's color
+                fillColor = object.color;
+            }
+            
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = fillColor;
+            ctx.strokeStyle = 'white';
+            ctx.fill();
+            ctx.stroke();
+            
+            // Add a small label number for positive points
+            if (point.label > 0) {
+                ctx.fillStyle = 'white';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(point.label.toString(), x, y);
+            }
+        });
     });
     
     // Add a debug message on the canvas
@@ -554,26 +621,49 @@ function drawMasks(frameMasks) {
     const data = imageData.data;
     
     // Draw each object's mask
-    objects.forEach((object, index) => {
+    Object.values(objects).forEach((object, index) => {
         if (frameMasks[object.id]) {
             const mask = frameMasks[object.id];
             
             if (DEBUG) {
                 console.log(`Drawing mask for object ${object.id}:`, {
-                    dimensions: `${mask.length}x${mask[0].length}`,
-                    sample: mask.slice(0, 3).map(row => row.slice(0, 3))
+                    dimensions: Array.isArray(mask[0]) ? 
+                        `${mask.length}x${mask[0].length}` : 
+                        `${mask.length}x${Math.sqrt(mask[0].length)}`,
+                    sample: mask.slice(0, 3).map(row => Array.isArray(row) ? row.slice(0, 3) : row)
                 });
             }
             
             // Get the object's color
             const color = parseRGBA(object.color);
             
-            // Handle the server's mask format which is a 3D array [object_id][height][width]
-            if (Array.isArray(mask) && mask.length === 1 && Array.isArray(mask[0]) && Array.isArray(mask[0][0])) {
-                console.log("Processing server mask format (3D array)");
-                const maskData = mask[0]; // Get the first object's mask
-                const maskHeight = maskData.length;
-                const maskWidth = maskData[0].length;
+            // Handle different mask formats:
+            // 1. 3D array [num_objects, height, width] from backend
+            // 2. 2D array [height, width] for single object
+            // 3. 1D array [height * width] that needs to be reshaped
+            if (Array.isArray(mask) && mask.length > 0) {
+                let maskData;
+                let maskHeight, maskWidth;
+                
+                if (Array.isArray(mask[0]) && Array.isArray(mask[0][0])) {
+                    // Case 1: 3D array [num_objects, height, width]
+                    console.log("Processing 3D mask array format");
+                    maskData = mask[index] || mask[0]; // Get the mask for this object index
+                    maskHeight = maskData.length;
+                    maskWidth = maskData[0].length;
+                } else if (Array.isArray(mask[0])) {
+                    // Case 2: 2D array [height, width]
+                    console.log("Processing 2D mask array format");
+                    maskData = mask;
+                    maskHeight = mask.length;
+                    maskWidth = mask[0].length;
+                } else {
+                    // Case 3: 1D array [height * width]
+                    console.log("Processing 1D mask array format");
+                    maskHeight = Math.sqrt(mask.length);
+                    maskWidth = maskHeight;
+                    maskData = mask;
+                }
                 
                 console.log(`Processing mask with dimensions ${maskWidth}x${maskHeight}`);
                 
@@ -588,30 +678,20 @@ function drawMasks(frameMasks) {
                         const maskY = Math.floor(y / scaleY);
                         const maskX = Math.floor(x / scaleX);
                         
-                        // Check if the mask has a value at this position
-                        if (maskY < maskHeight && maskX < maskWidth && maskData[maskY][maskX] > 0) {
-                            const idx = (y * canvasElement.width + x) * 4;
-                            // Blend the colors using alpha compositing
-                            const alpha = color.a * 255;
-                            data[idx] = (data[idx] * (255 - alpha) + color.r * alpha) / 255;     // R
-                            data[idx + 1] = (data[idx + 1] * (255 - alpha) + color.g * alpha) / 255; // G
-                            data[idx + 2] = (data[idx + 2] * (255 - alpha) + color.b * alpha) / 255; // B
-                            data[idx + 3] = Math.min(255, data[idx + 3] + alpha); // A
+                        // Get mask value based on data format
+                        let maskValue = 0;
+                        if (Array.isArray(maskData[maskY])) {
+                            // 2D array format
+                            maskValue = maskData[maskY][maskX] || 0;
+                        } else {
+                            // 1D array format
+                            const idx = maskY * maskWidth + maskX;
+                            maskValue = maskData[idx] || 0;
                         }
-                    }
-                }
-            } else {
-                // Create a test mask in the center of the canvas
-                console.log("Creating test mask (fallback)");
-                const centerX = Math.floor(canvasElement.width / 2);
-                const centerY = Math.floor(canvasElement.height / 2);
-                const radius = Math.min(canvasElement.width, canvasElement.height) / 4;
-                
-                for (let i = 0; i < canvasElement.height; i++) {
-                    for (let j = 0; j < canvasElement.width; j++) {
-                        const distance = Math.sqrt(Math.pow(i - centerY, 2) + Math.pow(j - centerX, 2));
-                        if (distance < radius) {
-                            const idx = (i * canvasElement.width + j) * 4;
+                        
+                        // Check if the mask has a value at this position
+                        if (maskY < maskHeight && maskX < maskWidth && maskValue > 0) {
+                            const idx = (y * canvasElement.width + x) * 4;
                             // Blend the colors using alpha compositing
                             const alpha = color.a * 255;
                             data[idx] = (data[idx] * (255 - alpha) + color.r * alpha) / 255;     // R
@@ -653,17 +733,27 @@ function parseRGBA(rgba) {
 
 // Handle add object button click
 function handleAddObject() {
-    const newId = objects.length + 1;
-    objects.push({
+    // Generate a new sequential ID starting from 1
+    const newId = Object.keys(objects).length + 1;
+    
+    // Create a new object with the next available label
+    objects[newId] = {
         id: newId,
         label: `Object ${newId}`,
-        thumbnail: null,
-        points: {},
+        points: [],  // Initialize points as an empty array
+        masks: [],
         color: maskColors[(newId - 1) % maskColors.length]
-    });
+    };
     
+    // Set the new object as the current object
     currentObjectId = newId;
+    
+    // Update the objects list in the UI
     updateObjectsList();
+    
+    if (DEBUG) {
+        console.log(`Added new object with ID ${newId} and label ${objects[newId].label}`);
+    }
 }
 
 // Handle start over button click
@@ -684,14 +774,21 @@ async function handleTrackObjects() {
     
     // Convert points data to the format expected by the backend
     const prompts = {};
-    objects.forEach(obj => {
-        Object.entries(obj.points).forEach(([frame, points]) => {
-            const frameIndex = parseInt(frame);
-            if (!prompts[frameIndex]) {
-                prompts[frameIndex] = [];
-            }
-            prompts[frameIndex].push(...points);
-        });
+    Object.values(objects).forEach(obj => {
+        if (Array.isArray(obj.points)) {
+            obj.points.forEach(point => {
+                const frameIndex = currentFrame;
+                if (!prompts[frameIndex]) {
+                    prompts[frameIndex] = [];
+                }
+                prompts[frameIndex].push({
+                    x: point.x,
+                    y: point.y,
+                    label: point.label,
+                    obj_id: point.obj_id
+                });
+            });
+        }
     });
 
     if (DEBUG) {
@@ -729,8 +826,8 @@ async function handleTrackObjects() {
                     sampleFrame: Object.keys(masks)[0] ? {
                         frameIndex: Object.keys(masks)[0],
                         objects: Object.keys(masks[Object.keys(masks)[0]]).length,
-                        dimensions: masks[Object.keys(masks)[0]][objects[0].id] ? 
-                            `${masks[Object.keys(masks)[0]][objects[0].id].length}x${masks[Object.keys(masks)[0]][objects[0].id][0].length}` : 
+                        dimensions: masks[Object.keys(masks)[0]][currentObjectId] ? 
+                            `${masks[Object.keys(masks)[0]][currentObjectId].length}x${masks[Object.keys(masks)[0]][currentObjectId][0].length}` : 
                             'no mask data'
                     } : 'no frames'
                 });
@@ -753,7 +850,7 @@ async function handleTrackObjects() {
 // Update objects list in sidebar
 function updateObjectsList() {
     const objectsList = document.querySelector('.objects-list');
-    objectsList.innerHTML = objects.map(obj => `
+    objectsList.innerHTML = Object.values(objects).map(obj => `
         <div class="object-item ${obj.id === currentObjectId ? 'active' : ''}" data-id="${obj.id}">
             <div class="object-preview">
                 ${obj.thumbnail ? `<img src="${obj.thumbnail}" alt="${obj.label}">` : ''}
@@ -818,15 +915,23 @@ function formatTime(seconds) {
 function resetState() {
     currentFrame = 0;
     isPlaying = false;
-    objects = [{
-        id: 1,
-        label: 'Object 1',
-        thumbnail: null,
-        points: {},
-        color: maskColors[0]
-    }];
-    currentObjectId = 1;
+    objects = {};
+    currentObjectId = null;
     currentAction = 'add';
+    
+    // Create initial object with ID 1
+    currentObjectId = 1;
+    objects[currentObjectId] = {
+        id: currentObjectId,
+        label: 'Object 1',
+        points: [],
+        masks: [],
+        color: maskColors[0]
+    };
+    
+    if (DEBUG) {
+        console.log(`Reset state: Created initial object with ID ${currentObjectId} and label 1`);
+    }
     
     updateObjectsList();
 }

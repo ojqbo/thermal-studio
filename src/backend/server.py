@@ -47,7 +47,8 @@ inference_state = None
 class PromptPoint(TypedDict):
     x: float
     y: float
-    label: int
+    label: int  # 1 for positive, 0 for negative
+    obj_id: int  # object id of the prompt point
 
 # Initialize SAM2 model
 async def init_sam2():
@@ -75,7 +76,7 @@ async def process_frame_with_prompts(frame_idx: int, prompts: List[PromptPoint])
     
     Args:
         frame_idx: Index of the frame to process
-        prompts: List of prompt points with x, y coordinates and label
+        prompts: List of prompt points with x, y coordinates, a label (positive, negative prompt) and an object id
         
     Returns:
         numpy array of the mask of shape (C, H, W)
@@ -89,56 +90,76 @@ async def process_frame_with_prompts(frame_idx: int, prompts: List[PromptPoint])
         if DEBUG:
             logger.debug("\n=== Starting Video Processing ===")
             logger.debug(f"\nProcessing frame {frame_idx}:")
+            logger.debug(f"\nPrompts: {prompts}")
+        
+        # group prompts by object id
+        prompts_by_obj_id = {}
+        for prompt in prompts:
+            if prompt["obj_id"] not in prompts_by_obj_id:
+                prompts_by_obj_id[prompt["obj_id"]] = []
+            prompts_by_obj_id[prompt["obj_id"]].append(prompt)
+        
+        for obj_id, prompts in prompts_by_obj_id.items():
+            # Prepare points and labels
+            points = []
+            labels = []
             
-        # Prepare points and labels
-        points = []
-        labels = []
-        
-        points.append([prompts["x"], prompts["y"]])
-        labels.append(prompts["label"])
-        
-        if DEBUG:
-            logger.debug(f"Processing {len(points)} points:")
-            for i, (point, label) in enumerate(zip(points, labels)):
-                logger.debug(f"  Point {i + 1}: ({point[0]:.2f}, {point[1]:.2f}) - {'Positive' if label > 0 else 'Negative'}")
-        
-        # Convert to numpy arrays
-        points = np.array(points)
-        labels = np.array(labels)
-        
-        masks_frame = None
-        # Process frame with SAM2
-        if len(points) > 0:            
-            if DEBUG:
-                logger.debug(f"Calling SAM2 model with {len(points)} points")
-            
-            # Add points to the model
-            processed_frame_idx, obj_ids, masks_frame = sam2_predictor.add_new_points_or_box(
-                inference_state=inference_state,
-                frame_idx=frame_idx,
-                obj_id=None,
-                points=points,
-                labels=labels,
-                clear_old_points=True
-            )
-            if processed_frame_idx != frame_idx:
-                logger.warning(f"Frame index mismatch: {processed_frame_idx} != {frame_idx}")
+            # Handle both single point and array of points
+            if isinstance(prompts, dict):
+                # Single point case
+                points.append([prompts["x"], prompts["y"]])
+                labels.append(prompts["label"])
+            else:
+                # Array of points case
+                for prompt in prompts:
+                    points.append([prompt["x"], prompt["y"]])
+                    labels.append(prompt["label"])
             
             if DEBUG:
-                logger.debug(f"Generated mask for frame {processed_frame_idx}")
-                if masks_frame is not None:
-                    logger.debug(f"Mask shape: {masks_frame.shape}")
+                logger.debug(f"Processing {len(points)} points:")
+                for i, (point, label) in enumerate(zip(points, labels)):
+                    logger.debug(f"  Point {i + 1}: ({point[0]:.2f}, {point[1]:.2f}) - {'Positive' if label > 0 else 'Negative'}, {label=}")
             
+            # Convert to numpy arrays
+            points = np.array(points)
+            labels = np.array(labels)
+            
+            masks_frame = None
+            # Process frame with SAM2
+            if len(points) > 0:            
+                if DEBUG:
+                    logger.debug(f"Calling SAM2 model with {len(points)} points")
+                
+                # Add points to the model
+                processed_frame_idx, obj_ids, masks_frame = sam2_predictor.add_new_points_or_box(
+                    inference_state=inference_state,
+                    frame_idx=frame_idx,
+                    obj_id=obj_id,
+                    points=points,
+                    labels=labels,
+                    clear_old_points=True
+                )
+                if DEBUG:
+                    # lets see what obj_ids are
+                    logger.debug(f"Object IDs: {obj_ids}")
+                if processed_frame_idx != frame_idx:
+                    logger.warning(f"Frame index mismatch: {processed_frame_idx} != {frame_idx}")
+                
+                if DEBUG:
+                    logger.debug(f"Generated mask for frame {processed_frame_idx}")
+                    if masks_frame is not None:
+                        logger.debug(f"Mask shape: {masks_frame.shape}")
+                
         # Store mask directly as returned by SAM2
         if masks_frame is not None:
             masks_frame = masks_frame.detach().cpu().numpy()
-            masks_frame = masks_frame[0]  # Remove batch dimension
+            masks_frame = masks_frame[:, 0]  # Remove batch dimension
             masks_frame = (masks_frame > 0).astype(np.uint8)
 
         if DEBUG:
             logger.debug("\n=== Processing Complete ===")
             logger.debug(f"Masks shape: {masks_frame.shape}")
-        
+            
         return masks_frame
     
     except Exception as e:
