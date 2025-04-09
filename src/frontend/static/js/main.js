@@ -331,19 +331,17 @@ class VideoManager {
                 const fillColor = point.label === 0 ? 'rgba(255, 0, 0, 0.7)' : object.color;
                 
                 this.state.ctx.beginPath();
-                this.state.ctx.arc(x, y, 5, 0, 2 * Math.PI);
+                this.state.ctx.arc(x, y, 8, 0, 2 * Math.PI);
                 this.state.ctx.fillStyle = fillColor;
                 this.state.ctx.strokeStyle = 'white';
                 this.state.ctx.fill();
                 this.state.ctx.stroke();
                 
-                if (point.label > 0) {
-                    this.state.ctx.fillStyle = 'white';
-                    this.state.ctx.font = '10px Arial';
-                    this.state.ctx.textAlign = 'center';
-                    this.state.ctx.textBaseline = 'middle';
-                    this.state.ctx.fillText(point.label.toString(), x, y);
-                }
+                this.state.ctx.fillStyle = 'white';
+                this.state.ctx.font = '12px Arial';
+                this.state.ctx.textAlign = 'center';
+                this.state.ctx.textBaseline = 'middle';
+                this.state.ctx.fillText(point.obj_id.toString(), x, y);
             });
         });
     }
