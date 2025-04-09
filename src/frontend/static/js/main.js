@@ -10,7 +10,8 @@ const MASK_COLORS = [
 
 // State Management
 class AppState {
-    constructor() {
+    constructor(ui) {
+        this.ui = ui;
         this.videoFile = null;
         this.videoElement = null;
         this.canvasElement = null;
@@ -45,6 +46,9 @@ class AppState {
             masks: [],
             color: MASK_COLORS[0]
         };
+        
+        // Update UI to show the first object as active
+        this.ui.updateObjectsList();
     }
 }
 
@@ -367,6 +371,11 @@ class ObjectManager {
         this.videoManager = videoManager;
     }
 
+    setActiveObject(objectId) {
+        this.state.currentObjectId = objectId;
+        this.ui.updateObjectsList();
+    }
+
     addObject() {
         const newId = Object.keys(this.state.objects).length + 1;
         
@@ -658,8 +667,9 @@ class FileManager {
 // Application
 class Application {
     constructor() {
-        this.state = new AppState();
-        this.ui = new UIManager(this.state);
+        this.ui = new UIManager();
+        this.state = new AppState(this.ui);
+        this.ui.state = this.state;
         this.videoManager = new VideoManager(this.state, this.ui);
         this.objectManager = new ObjectManager(this.state, this.ui, this.videoManager);
         this.fileManager = new FileManager(this.state, this.ui);
@@ -728,6 +738,15 @@ class Application {
         this.ui.elements.addObjectBtn.addEventListener('click', () => this.objectManager.addObject());
         this.ui.elements.startOverBtn.addEventListener('click', () => this.objectManager.startOver());
         this.ui.elements.trackObjectsBtn.addEventListener('click', () => this.objectManager.trackObjects());
+        
+        // Add click handler for object items
+        document.querySelector('.objects-list').addEventListener('click', (e) => {
+            const objectItem = e.target.closest('.object-item');
+            if (objectItem && !e.target.closest('.remove-object-btn')) {
+                const objectId = parseInt(objectItem.dataset.id);
+                this.objectManager.setActiveObject(objectId);
+            }
+        });
         
         // Canvas handlers
         this.state.canvasElement.addEventListener('click', (e) => this.objectManager.handleCanvasClick(e));

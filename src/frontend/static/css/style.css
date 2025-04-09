@@ -122,6 +122,30 @@ body {
     display: flex;
     align-items: center;
     gap: 1rem;
+    border: 1px solid var(--border-color);
+    transition: all 0.2s ease-in-out;
+    cursor: pointer;
+}
+
+.object-item.active {
+    background-color: rgba(0, 102, 255, 0.1);
+    border: 2px solid var(--primary-color);
+    box-shadow: 0 0 0 1px var(--primary-color);
+    transform: translateY(-1px);
+}
+
+.object-item:hover {
+    background-color: var(--hover-color);
+    transform: translateY(-1px);
+}
+
+.object-item.active:hover {
+    background-color: rgba(0, 102, 255, 0.15);
+}
+
+.object-item.active .object-label {
+    color: var(--primary-color);
+    font-weight: 500;
 }
 
 .object-preview {
