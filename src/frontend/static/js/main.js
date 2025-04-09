@@ -12,7 +12,6 @@ const MASK_COLORS = [
 class AppState {
     constructor(ui) {
         this.ui = ui;
-        this.videoFile = null;
         this.videoElement = null;
         this.canvasElement = null;
         this.ctx = null;
@@ -28,7 +27,6 @@ class AppState {
         this.maskOpacity = 0.5;
         this.objects = {};
         this.currentObjectId = null;
-        this.currentAction = 'add';
     }
 
     reset() {
@@ -36,14 +34,12 @@ class AppState {
         this.isPlaying = false;
         this.objects = {};
         this.currentObjectId = 1;
-        this.currentAction = 'add';
         
         // Create initial object
         this.objects[this.currentObjectId] = {
             id: this.currentObjectId,
             label: 'Object 1',
             points: [],
-            masks: [],
             color: MASK_COLORS[0]
         };
         
@@ -54,8 +50,9 @@ class AppState {
 
 // UI Manager
 class UIManager {
-    constructor(state) {
+    constructor(state, fileManager) {
         this.state = state;
+        this.fileManager = fileManager;
         this.elements = {
             uploadForm: document.getElementById('upload-form'),
             uploadSection: document.getElementById('upload-section'),
@@ -388,7 +385,6 @@ class ObjectManager {
             id: newId,
             label: `Object ${newId}`,
             points: [],
-            masks: [],
             color: MASK_COLORS[(newId - 1) % MASK_COLORS.length]
         };
         
@@ -406,14 +402,12 @@ class ObjectManager {
             
             // Reset to initial state with one object
             this.state.currentObjectId = 1;
-            this.state.currentAction = 'add';
             
             // Create initial object
             this.state.objects[this.state.currentObjectId] = {
                 id: this.state.currentObjectId,
                 label: 'Object 1',
                 points: [],
-                masks: [],
                 color: MASK_COLORS[0]
             };
             
@@ -454,7 +448,6 @@ class ObjectManager {
                 id: this.state.currentObjectId,
                 label: `Object ${this.state.currentObjectId}`,
                 points: [],
-                masks: [],
                 color: MASK_COLORS[(this.state.currentObjectId - 1) % MASK_COLORS.length]
             };
         }
@@ -671,10 +664,11 @@ class FileManager {
     constructor(state, ui) {
         this.state = state;
         this.ui = ui;
+        this.videoFile = null;
     }
 
     async handleFile(file) {
-        this.state.videoFile = file;
+        this.videoFile = file;
         
         const formData = new FormData();
         formData.append('file', file);
