@@ -263,18 +263,11 @@ async def process_video_with_prompts(sam2_predictor) -> List[tuple[int, np.ndarr
     if inference_state is None:
         raise RuntimeError("Inference state not initialized. Please upload a video first.")
     
-    # set frame idx of inference_state to 0
-    frame_idx, object_ids, masks = sam2_predictor.propagate_in_video(
-        inference_state=inference_state,
-        start_frame_idx=0
-    )
-    masks = masks.detach().cpu().numpy()
-    masks = masks[0]  # Remove batch dimension
-    masks = (masks > 0).astype(np.uint8)
-    yield frame_idx, masks
-
     # propagate the prompts to get masklets throughout the video
-    for frame_idx, object_ids, masks in sam2_predictor.propagate_in_video(inference_state):
+    for frame_idx, object_ids, masks in sam2_predictor.propagate_in_video(
+            inference_state=inference_state,
+            start_frame_idx=0
+        ):
         masks = masks.detach().cpu().numpy()
         masks = masks[0]  # Remove batch dimension
         masks = (masks > 0).astype(np.uint8)

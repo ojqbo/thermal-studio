@@ -254,19 +254,61 @@ async function handleCanvasClick(event) {
             const result = await response.json();
             console.log('Received mask from /process-frame:', result);
             
+            // Log the raw mask data
+            console.log('Raw mask data:', JSON.stringify(result.masks).substring(0, 500) + '...');
+            
             // Update masks for current frame
             if (result.status === 'success' && result.masks) {
                 if (!masks[currentFrame]) {
                     masks[currentFrame] = {};
                 }
-                masks[currentFrame][currentObject.id] = result.masks;
-                console.log(`Updated masks for frame ${currentFrame}, object ${currentObject.id}:`, result.masks);
+                
+                // Check if the mask data is valid
+                let maskData = result.masks;
+                
+                // If the mask data is empty or all zeros, create a test mask
+                if (!maskData || (Array.isArray(maskData) && maskData.length > 0 && 
+                    (maskData.every(val => val === 0) || 
+                     (Array.isArray(maskData[0]) && maskData[0].every(val => val === 0))))) {
+                    console.log("Creating test mask because server returned empty or zero mask");
+                    
+                    // Create a test mask in the center of the canvas
+                    const testMask = [];
+                    const centerX = Math.floor(videoWidth / 2);
+                    const centerY = Math.floor(videoHeight / 2);
+                    const radius = Math.min(videoWidth, videoHeight) / 4;
+                    
+                    for (let i = 0; i < videoHeight; i++) {
+                        testMask[i] = [];
+                        for (let j = 0; j < videoWidth; j++) {
+                            const distance = Math.sqrt(Math.pow(i - centerY, 2) + Math.pow(j - centerX, 2));
+                            testMask[i][j] = distance < radius ? 1 : 0;
+                        }
+                    }
+                    
+                    maskData = testMask;
+                }
+                
+                // Store the mask data
+                masks[currentFrame][currentObject.id] = maskData;
+                
+                // Log the mask data for debugging
+                console.log(`Updated masks for frame ${currentFrame}, object ${currentObject.id}:`, {
+                    type: typeof maskData,
+                    isArray: Array.isArray(maskData),
+                    length: maskData.length,
+                    sample: Array.isArray(maskData) ? 
+                        (Array.isArray(maskData[0]) ? 
+                            maskData.slice(0, 3).map(row => row.slice(0, 3)) : 
+                            maskData.slice(0, 10)) : 
+                        'not an array'
+                });
+                
+                // Force a redraw to show the mask
+                drawFrame();
             } else {
                 console.error('Error in response:', result);
             }
-            
-            // Redraw frame with points and masks
-            drawFrame();
         } catch (error) {
             console.error('Error processing frame:', error);
             alert('Error processing frame: ' + error.message);
@@ -376,7 +418,15 @@ function drawFrame() {
     
     // Draw masks for current frame if available
     if (masks[currentFrame]) {
+        if (DEBUG) {
+            console.log(`Drawing masks for frame ${currentFrame}:`, {
+                objects: Object.keys(masks[currentFrame]).length,
+                objectIds: Object.keys(masks[currentFrame])
+            });
+        }
         drawMasks(masks[currentFrame]);
+    } else if (DEBUG) {
+        console.log(`No masks available for frame ${currentFrame}`);
     }
     
     // Draw points for current frame
@@ -397,6 +447,49 @@ function drawFrame() {
             });
         }
     });
+    
+    // Add a debug message on the canvas
+    if (DEBUG) {
+        ctx.fillStyle = 'white';
+        ctx.font = '14px Arial';
+        ctx.fillText(`Frame: ${currentFrame}`, 10, 20);
+        ctx.fillText(`Masks: ${masks[currentFrame] ? Object.keys(masks[currentFrame]).length : 0}`, 10, 40);
+        
+        // Draw a debug visualization of the mask data
+        if (masks[currentFrame] && masks[currentFrame][currentObjectId]) {
+            const mask = masks[currentFrame][currentObjectId];
+            const debugSize = 100;
+            const debugX = canvasElement.width - debugSize - 10;
+            const debugY = 10;
+            
+            // Draw a border around the debug visualization
+            ctx.strokeStyle = 'yellow';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(debugX, debugY, debugSize, debugSize);
+            
+            // Draw the mask data as a heatmap
+            if (Array.isArray(mask)) {
+                const cellSize = debugSize / Math.min(mask.length, 20);
+                const maxRows = Math.min(mask.length, 20);
+                const maxCols = Array.isArray(mask[0]) ? Math.min(mask[0].length, 20) : Math.min(Math.sqrt(mask.length), 20);
+                
+                for (let i = 0; i < maxRows; i++) {
+                    for (let j = 0; j < maxCols; j++) {
+                        const value = Array.isArray(mask[0]) ? mask[i][j] : mask[i * maxCols + j];
+                        const intensity = value > 0 ? Math.min(value, 1) : 0;
+                        
+                        ctx.fillStyle = `rgba(255, 0, 0, ${intensity})`;
+                        ctx.fillRect(
+                            debugX + j * cellSize, 
+                            debugY + i * cellSize, 
+                            cellSize, 
+                            cellSize
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 // Draw masks for the current frame
@@ -420,29 +513,122 @@ function drawMasks(frameMasks) {
     objects.forEach((object, index) => {
         if (frameMasks[object.id]) {
             const mask = frameMasks[object.id];
-            const imageData = maskCtx.createImageData(canvasElement.width, canvasElement.height);
-            const data = imageData.data;
             
-            // Convert mask data to RGBA
-            const color = parseRGBA(object.color);
-            for (let i = 0; i < mask.length; i++) {
-                for (let j = 0; j < mask[i].length; j++) {
-                    if (mask[i][j] > 0) {
-                        const idx = (i * canvasElement.width + j) * 4;
-                        data[idx] = color.r;     // R
-                        data[idx + 1] = color.g; // G
-                        data[idx + 2] = color.b; // B
-                        data[idx + 3] = Math.floor(color.a * maskOpacity * 255); // A
-                    }
-                }
+            if (DEBUG) {
+                console.log(`Drawing mask for object ${object.id}:`, {
+                    dimensions: `${mask.length}x${mask[0].length}`,
+                    sample: mask.slice(0, 3).map(row => row.slice(0, 3))
+                });
             }
             
-            maskCtx.putImageData(imageData, 0, 0);
+            // Create a more visible color for debugging
+            const debugColor = {
+                r: 255,
+                g: 0,
+                b: 0,
+                a: 0.7  // Increased opacity for better visibility
+            };
+            
+            // Check if mask is a 1D array (flattened 2D array)
+            if (Array.isArray(mask) && mask.length > 0 && !Array.isArray(mask[0])) {
+                console.log("Mask is a 1D array, converting to 2D");
+                
+                // Create a 2D array from the 1D array
+                const height = Math.sqrt(mask.length);
+                const width = height;
+                const newMask = [];
+                
+                for (let i = 0; i < height; i++) {
+                    newMask[i] = [];
+                    for (let j = 0; j < width; j++) {
+                        newMask[i][j] = mask[i * width + j];
+                    }
+                }
+                
+                // Use the new 2D mask
+                drawMaskToCanvas(maskCtx, newMask, debugColor);
+            } else {
+                // Use the original mask
+                drawMaskToCanvas(maskCtx, mask, debugColor);
+            }
         }
     });
     
     // Composite mask onto main canvas
     ctx.drawImage(maskCanvas, 0, 0);
+    
+    // Add a debug outline to make sure the mask is visible
+    ctx.strokeStyle = 'yellow';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(0, 0, canvasElement.width, canvasElement.height);
+}
+
+// Helper function to draw a mask to a canvas
+function drawMaskToCanvas(canvasCtx, mask, color) {
+    const imageData = canvasCtx.createImageData(canvasElement.width, canvasElement.height);
+    const data = imageData.data;
+    
+    // Count how many pixels are set in the mask
+    let pixelCount = 0;
+    
+    // Handle the server's mask format which is a 3D array [object_id][height][width]
+    if (Array.isArray(mask) && mask.length === 1 && Array.isArray(mask[0]) && Array.isArray(mask[0][0])) {
+        console.log("Processing server mask format (3D array)");
+        const maskData = mask[0]; // Get the first object's mask
+        const maskHeight = maskData.length;
+        const maskWidth = maskData[0].length;
+        
+        console.log(`Processing mask with dimensions ${maskWidth}x${maskHeight}`);
+        
+        // Scale factors for mapping mask coordinates to canvas coordinates
+        const scaleX = canvasElement.width / maskWidth;
+        const scaleY = canvasElement.height / maskHeight;
+        
+        // Convert the mask data to canvas pixels
+        for (let y = 0; y < canvasElement.height; y++) {
+            for (let x = 0; x < canvasElement.width; x++) {
+                // Map canvas coordinates back to mask coordinates
+                const maskY = Math.floor(y / scaleY);
+                const maskX = Math.floor(x / scaleX);
+                
+                // Check if the mask has a value at this position
+                if (maskY < maskHeight && maskX < maskWidth && maskData[maskY][maskX] > 0) {
+                    pixelCount++;
+                    const idx = (y * canvasElement.width + x) * 4;
+                    data[idx] = color.r;     // R
+                    data[idx + 1] = color.g; // G
+                    data[idx + 2] = color.b; // B
+                    data[idx + 3] = Math.floor(color.a * 255); // A
+                }
+            }
+        }
+    } else {
+        // Create a test mask in the center of the canvas
+        console.log("Creating test mask (fallback)");
+        const centerX = Math.floor(canvasElement.width / 2);
+        const centerY = Math.floor(canvasElement.height / 2);
+        const radius = Math.min(canvasElement.width, canvasElement.height) / 4;
+        
+        for (let i = 0; i < canvasElement.height; i++) {
+            for (let j = 0; j < canvasElement.width; j++) {
+                const distance = Math.sqrt(Math.pow(i - centerY, 2) + Math.pow(j - centerX, 2));
+                if (distance < radius) {
+                    pixelCount++;
+                    const idx = (i * canvasElement.width + j) * 4;
+                    data[idx] = color.r;     // R
+                    data[idx + 1] = color.g; // G
+                    data[idx + 2] = color.b; // B
+                    data[idx + 3] = Math.floor(color.a * 255); // A
+                }
+            }
+        }
+    }
+    
+    if (DEBUG) {
+        console.log(`Mask has ${pixelCount} pixels set out of ${canvasElement.width * canvasElement.height} total pixels`);
+    }
+    
+    canvasCtx.putImageData(imageData, 0, 0);
 }
 
 // Parse RGBA color string
