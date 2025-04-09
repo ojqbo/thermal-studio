@@ -33,8 +33,8 @@ MASKS_DIR = DATA_DIR / "masks"
 MODEL_DIR = DATA_DIR / "models"
 
 # SAM2 model configuration
-MODEL_CONFIG = "configs/sam2.1/sam2.1_hiera_l.yaml"  # internal to sam2 package, do not change
-MODEL_CHECKPOINT = MODEL_DIR /"sam2.1_hiera_large.pt"
+MODEL_CONFIG = "configs/sam2.1/sam2.1_hiera_t.yaml"  # internal to sam2 package, do not change
+MODEL_CHECKPOINT = MODEL_DIR /"sam2.1_hiera_tiny.pt"
 
 # Ensure directories exist
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -66,12 +66,14 @@ async def init_sam2():
         logger.error(f"Error initializing SAM2: {e}")
         return False
 
-async def get_mask_of_a_single_frame(sam2_predictor, frame_idx: int) -> np.ndarray:
-    """Process all frames of the video with the prompts applied by the user so far.
+async def get_masks_of_many_frames(sam2_predictor, start_frame_idx: int = 0, num_frames: int | None = None) -> np.ndarray:
+    """Process N frames of the video with the prompts applied by the user so far.
 
     Args:
         sam2_predictor: The SAM2 predictor object, with proper state of prompts.
-        frame_idx: The index of the frame to process.
+        start_frame_idx: The index of the first frame to process.
+        num_frames: The number of frames to process. If None, all frames will be processed.
+
     Returns:
         Masks for all frames of shape (C, H, W), where:
             - C is the number of channels,
@@ -81,21 +83,39 @@ async def get_mask_of_a_single_frame(sam2_predictor, frame_idx: int) -> np.ndarr
         where 1 means the pixel is part of the mask.
     """
     global inference_state
-    
+    if num_frames is None:
+        num_frames = inference_state["num_frames"]
+
     if inference_state is None:
         raise RuntimeError("Inference state not initialized. Please upload a video first.")
     
-    for _frame_idx, object_ids, masks in sam2_predictor.propagate_in_video(
+    for frame_idx, object_ids, masks in sam2_predictor.propagate_in_video(
             inference_state=inference_state,
-            start_frame_idx=frame_idx,
-            max_frame_num_to_track=frame_idx + 1,
+            start_frame_idx=start_frame_idx,
+            max_frame_num_to_track=start_frame_idx + num_frames,
         ):
-        if frame_idx != _frame_idx:
-            logger.warning(f"Frame index mismatch: {frame_idx} != {_frame_idx}")
         masks = masks.detach().cpu().numpy()
         masks = masks[:, 0]  # Remove batch dimension
         masks = (masks > 0).astype(np.uint8)
-        return masks
+        yield frame_idx, masks
+
+async def get_mask_of_a_single_frame(sam2_predictor, frame_idx: int) -> np.ndarray:
+    """Process a single frame of the video with the prompts applied by the user so far.
+
+    Args:
+        sam2_predictor: The SAM2 predictor object, with proper state of prompts.
+        frame_idx: The index of the frame to process.
+    Returns:
+        Numpy array of the mask of shape (C, H, W).
+        The mask is of type uint8, of values 0 and 1,
+        where 1 means the pixel is part of the mask.
+    """
+    mask = None
+    async for _frame_idx, mask in get_masks_of_many_frames(sam2_predictor, frame_idx, 1):  # only one frame
+        pass
+    if _frame_idx != frame_idx:
+        logger.warning(f"Frame index mismatch: {_frame_idx} != {frame_idx}")
+    return mask
 
 # Process frame with prompts
 async def process_frame_with_prompts(all_prompts: List[PromptPoint]) -> Dict[int, np.ndarray]:
@@ -295,24 +315,6 @@ async def handle_upload(request):
             os.remove(str(file_path))
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
-async def process_video_with_prompts(sam2_predictor) -> Dict[int, np.ndarray]:
-    """Process the entire video with the prompts applied by the user so far.
-
-    Args:
-        sam2_predictor: The SAM2 predictor object, with proper state of prompts.
-    Returns:
-        Mapping of frame_idx to numpy array of the mask of shape (C, H, W).
-        Masks for all frames are of shape (C, H, W), where:
-            - C is the number of channels,
-            - H is the height,
-            - W is the width.
-        The masks are returned as a numpy array of type uint8, of values 0 and 1,
-        where 1 means the pixel is part of the mask.
-    """
-    for frame_idx in range(inference_state["num_frames"]):
-        mask = await get_mask_of_a_single_frame(sam2_predictor, frame_idx)
-        yield frame_idx, mask
-
 
 async def handle_process_video(request):
     """Handle video processing with prompts applied by the user so far"""
@@ -333,7 +335,7 @@ async def handle_process_video(request):
         try:
             # Process video with prompts
             masks_dict = {}
-            async for frame_idx, mask in process_video_with_prompts(sam2_predictor):
+            async for frame_idx, mask in get_masks_of_many_frames(sam2_predictor):
                 masks_dict[frame_idx] = mask
             
             if DEBUG:
