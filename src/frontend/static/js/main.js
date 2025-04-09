@@ -72,7 +72,7 @@ class UIManager {
             progressFill: document.querySelector('.progress-fill'),
             progressText: document.querySelector('.progress-text'),
             fileInput: document.getElementById('file-input'),
-            fileInputLabel: document.querySelector('.file-input-label')
+            fileInputLabel: document.querySelector('.primary-btn')
         };
     }
 

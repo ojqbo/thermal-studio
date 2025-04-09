@@ -203,6 +203,32 @@ body {
     background-color: var(--hover-color);
 }
 
+.start-over-btn {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color);
+    background-color: var(--surface-color);
+    color: var(--text-color);
+    border-radius: 4px;
+    cursor: pointer;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transition: all 0.2s ease-in-out;
+}
+
+.start-over-btn:hover {
+    background-color: var(--hover-color);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.start-over-btn .icon {
+    font-size: 1rem;
+}
+
 .bottom-controls {
     display: flex;
     gap: 1rem;
@@ -225,6 +251,27 @@ body {
     background-color: var(--primary-color);
     color: white;
     border: none;
+}
+
+.primary-btn:hover {
+    background-color: #0052cc;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 102, 255, 0.2);
+    transition: all 0.2s ease-in-out;
+}
+
+.primary-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(0, 102, 255, 0.2);
+}
+
+.primary-btn.disabled {
+    background-color: #004d99;
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+    transform: none;
+    box-shadow: none;
 }
 
 .secondary-btn {
@@ -392,24 +439,6 @@ canvas {
 .drop-zone p {
     color: var(--secondary-color);
     margin: 0.5rem 0;
-}
-
-.file-input-label {
-    display: inline-block;
-    padding: 0.75rem 1.5rem;
-    background-color: var(--primary-color);
-    color: white;
-    border-radius: 4px;
-    cursor: pointer;
-    margin-top: 1rem;
-    font-size: 0.875rem;
-    transition: opacity 0.3s ease, cursor 0.3s ease;
-}
-
-.file-input-label.disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    pointer-events: none;
 }
 
 #file-input {

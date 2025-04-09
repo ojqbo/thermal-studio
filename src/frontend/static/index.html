@@ -34,7 +34,7 @@
                             <div class="upload-icon">📁</div>
                             <h3>Drop your video here</h3>
                             <p>or</p>
-                            <label for="file-input" class="file-input-label">Choose Video File</label>
+                            <label for="file-input" class="primary-btn">Choose Video File</label>
                             <input type="file" id="file-input" accept="video/*" required>
                         </div>
                         <div class="upload-progress" id="upload-progress" style="display: none;">
@@ -76,10 +76,12 @@
                     <button class="add-object-btn" id="add-object">
                         <span class="icon">+</span> Add another object
                     </button>
-
+                    <button class="start-over-btn" id="start-over">
+                        <span class="icon">↺</span> Reset objects and prompt points
+                    </button>
                     <div class="bottom-controls">
-                        <button class="secondary-btn" id="start-over">
-                            <span class="icon">↺</span> Start over
+                        <button class="primary-btn" id="back-to-file-upload">
+                            <span class="icon">←</span> Back to file upload
                         </button>
                         <button class="primary-btn" id="track-objects">
                             Track objects <span class="icon">→</span>
