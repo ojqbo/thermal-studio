@@ -108,10 +108,18 @@ body {
 }
 
 /* Object list styles */
-.objects-list {
+.objects-container {
+    display: flex;
+    flex-direction: column;
     flex: 1;
-    overflow-y: auto;
+    min-height: 0;
     margin: 1rem 0;
+}
+
+.objects-list {
+    overflow-y: auto;
+    margin-bottom: 0;
+    flex-shrink: 0;
 }
 
 .object-item {
@@ -196,7 +204,7 @@ body {
     color: var(--text-color);
     border-radius: 4px;
     cursor: pointer;
-    margin: 1rem 0;
+    margin: 0;
 }
 
 .add-object-btn:hover {
