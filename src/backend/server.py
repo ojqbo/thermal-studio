@@ -67,7 +67,7 @@ async def init_sam2():
         return False
 
 async def get_masks_of_many_frames(sam2_predictor, start_frame_idx: int = 0, num_frames: int | None = None) -> np.ndarray:
-    """Process N frames of the video with the prompts applied by the user so far.
+    """Process num_frames of the video with the prompts applied by the user so far.
 
     Args:
         sam2_predictor: The SAM2 predictor object, with proper state of prompts.
@@ -83,16 +83,17 @@ async def get_masks_of_many_frames(sam2_predictor, start_frame_idx: int = 0, num
         where 1 means the pixel is part of the mask.
     """
     global inference_state
-    if num_frames is None:
-        num_frames = inference_state["num_frames"]
 
     if inference_state is None:
         raise RuntimeError("Inference state not initialized. Please upload a video first.")
     
+    if DEBUG:
+        logger.debug(f"Processing {num_frames} frames starting from {start_frame_idx}")
+
     for frame_idx, object_ids, masks in sam2_predictor.propagate_in_video(
             inference_state=inference_state,
             start_frame_idx=start_frame_idx,
-            max_frame_num_to_track=start_frame_idx + num_frames,
+            max_frame_num_to_track=num_frames,
         ):
         masks = masks.detach().cpu().numpy()
         masks = masks[:, 0]  # Remove batch dimension
