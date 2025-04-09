@@ -335,6 +335,56 @@ async def handle_process_video(request):
             "message": str(e)
         }, status=500)
 
+async def handle_process_frame(request):
+    """Handle processing a single frame with prompts"""
+    try:
+        # Check if SAM2 is initialized
+        if sam2_predictor is None:
+            initialized = await init_sam2()
+            if not initialized:
+                return web.json_response({
+                    "status": "error",
+                    "message": "SAM2 model not initialized. Please check server logs for details."
+                }, status=500)
+        
+        # Parse request data
+        data = await request.json()
+        
+        if 'frame_idx' not in data or 'prompts' not in data:
+            return web.json_response({
+                "status": "error",
+                "message": "Missing required fields: frame_idx and prompts"
+            }, status=400)
+        
+        frame_idx = data['frame_idx']
+        prompts = data['prompts']
+        
+        if DEBUG:
+            logger.debug(f"Processing frame {frame_idx} with prompts: {prompts}")
+        
+        # Process frame with prompts
+        try:
+            masks = await process_frame_with_prompts(frame_idx, prompts)
+            
+            return web.json_response({
+                "status": "success",
+                "masks": masks.tolist()
+            })
+        except Exception as e:
+            logger.error(f"Error processing frame: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return web.json_response({
+                "status": "error",
+                "message": f"Error processing frame: {str(e)}"
+            }, status=500)
+    except Exception as e:
+        logger.error(f"Error handling process frame request: {e}")
+        return web.json_response({
+            "status": "error",
+            "message": str(e)
+        }, status=500)
+
 async def handle_root(request):
     """Serve the index.html file"""
     return web.FileResponse(BASE_DIR / "src" / "frontend" / "static" / "index.html")
@@ -346,7 +396,7 @@ app = web.Application()
 app.router.add_get('/', handle_root)  # Add root route
 app.router.add_post('/upload', handle_upload)
 app.router.add_post('/process-video', handle_process_video)
-app.router.add_post('/process-frame', process_frame_with_prompts)
+app.router.add_post('/process-frame', handle_process_frame)  # Use the new handler instead of the function directly
 
 # Add static routes for different content types
 app.router.add_static('/static', path=str(BASE_DIR / "src" / "frontend" / "static"))

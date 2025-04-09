@@ -197,7 +197,7 @@ async function loadVideo(filename) {
 }
 
 // Handle canvas click for point placement
-function handleCanvasClick(event) {
+async function handleCanvasClick(event) {
     event.preventDefault();
     
     if (!videoElement || isProcessing) return;
@@ -229,8 +229,51 @@ function handleCanvasClick(event) {
             updateObjectThumbnail(currentObject.id);
         }
         
-        // Redraw frame with points
-        drawFrame();
+        try {
+            isProcessing = true;
+            updateUIState();
+            
+            console.log(`Sending point to /process-frame: ${JSON.stringify(point)}`);
+            
+            // Call process_frame_with_prompts endpoint
+            const response = await fetch('/process-frame', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    frame_idx: currentFrame,
+                    prompts: point
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Frame processing failed: ${await response.text()}`);
+            }
+            
+            const result = await response.json();
+            console.log('Received mask from /process-frame:', result);
+            
+            // Update masks for current frame
+            if (result.status === 'success' && result.masks) {
+                if (!masks[currentFrame]) {
+                    masks[currentFrame] = {};
+                }
+                masks[currentFrame][currentObject.id] = result.masks;
+                console.log(`Updated masks for frame ${currentFrame}, object ${currentObject.id}:`, result.masks);
+            } else {
+                console.error('Error in response:', result);
+            }
+            
+            // Redraw frame with points and masks
+            drawFrame();
+        } catch (error) {
+            console.error('Error processing frame:', error);
+            alert('Error processing frame: ' + error.message);
+        } finally {
+            isProcessing = false;
+            updateUIState();
+        }
     }
 }
 
