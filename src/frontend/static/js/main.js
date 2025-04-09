@@ -320,6 +320,11 @@ class VideoManager {
                     return;
                 }
                 
+                // Only draw points that match the current frame index
+                if (point.frame_idx !== this.state.currentFrame) {
+                    return;
+                }
+                
                 const x = point.x * (this.state.canvasElement.width / this.state.videoWidth);
                 const y = point.y * (this.state.canvasElement.height / this.state.videoHeight);
                 
@@ -453,16 +458,51 @@ class ObjectManager {
         // Store the current frame index with the point
         const currentFrameIdx = this.state.currentFrame;
         
-        this.state.objects[this.state.currentObjectId].points.push({
-            x: scaledX,
-            y: scaledY,
-            label: isRightClick ? 0 : 1,  // 0 for negative prompts (right click), 1 for positive prompts (left click)
-            obj_id: this.state.currentObjectId,
-            frame_idx: currentFrameIdx  // Store the frame index at the time of point creation
-        });
+        // Check if a point already exists at this location
+        const existingPointIndex = this.findPointAtLocation(scaledX, scaledY, currentFrameIdx);
+        
+        if (existingPointIndex !== -1) {
+            // Remove the existing point
+            this.state.objects[this.state.currentObjectId].points.splice(existingPointIndex, 1);
+            console.log(`Removed point at (${scaledX}, ${scaledY})`);
+        } else {
+            // Add a new point
+            this.state.objects[this.state.currentObjectId].points.push({
+                x: scaledX,
+                y: scaledY,
+                label: isRightClick ? 0 : 1,  // 0 for negative prompts (right click), 1 for positive prompts (left click)
+                obj_id: this.state.currentObjectId,
+                frame_idx: currentFrameIdx  // Store the frame index at the time of point creation
+            });
+            console.log(`Added point at (${scaledX}, ${scaledY})`);
+        }
         
         await this.processFrame();
         this.videoManager.drawFrame();  // Ensure the frame is redrawn after processing
+    }
+    
+    // Helper method to find if a point exists at the given location
+    findPointAtLocation(x, y, frameIdx) {
+        const points = this.state.objects[this.state.currentObjectId].points;
+        const clickRadius = 10; // Radius in pixels to consider a click as "on" a point
+        
+        for (let i = 0; i < points.length; i++) {
+            const point = points[i];
+            // Only check points for the current frame
+            if (point.frame_idx !== frameIdx) continue;
+            
+            // Calculate distance between click and point
+            const dx = point.x - x;
+            const dy = point.y - y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            // If within the click radius, consider it a hit
+            if (distance < clickRadius) {
+                return i;
+            }
+        }
+        
+        return -1; // No point found at this location
     }
 
     async processFrame() {
