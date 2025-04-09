@@ -490,8 +490,8 @@ class ObjectManager {
         this.videoManager.drawFrame();
     }
 
-    startOver() {
-        if (confirm('Are you sure you want to start over? All points will be cleared.')) {
+    startOver(customMessage = 'Are you sure you want to start over? All points will be cleared.') {
+        if (confirm(customMessage)) {
             // Clear all objects, points, and masks
             this.state.objects = {};
             this.state.masks = {};
@@ -992,6 +992,27 @@ class Application {
         const backToSelectionBtn = document.getElementById('back-to-selection');
         if (backToSelectionBtn) {
             backToSelectionBtn.addEventListener('click', () => this.objectManager.switchToSelectionMode());
+        }
+        
+        // Back to file upload button handler
+        const backToFileUploadBtn = document.getElementById('back-to-file-upload');
+        if (backToFileUploadBtn) {
+            backToFileUploadBtn.addEventListener('click', () => {
+                // Reset objects, masks, and prompt points
+                this.objectManager.startOver('Are you sure you want to go back to file upload? All objects, masks, and prompt points will be cleared.');
+                
+                // Hide workspace and show upload section
+                this.ui.elements.workspace.style.display = 'none';
+                this.ui.elements.uploadSection.style.display = 'flex';
+                
+                // Reset file input to allow selecting the same file again
+                this.ui.elements.fileInput.value = '';
+                
+                // Reset upload progress
+                this.ui.elements.uploadProgress.style.display = 'none';
+                this.ui.elements.progressFill.style.width = '0%';
+                this.ui.elements.progressText.textContent = '';
+            });
         }
         
         // Add click handler for object items
