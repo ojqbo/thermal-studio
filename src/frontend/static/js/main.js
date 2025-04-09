@@ -423,7 +423,15 @@ class ObjectManager {
             // Reset video to beginning if it exists
             if (this.state.videoElement) {
                 this.state.videoElement.currentTime = 0;
-                this.videoManager.drawFrame();
+                this.state.videoElement.pause();
+                this.ui.elements.playPauseBtn.innerHTML = '<span class="icon">▶</span>';
+                this.ui.elements.frameSlider.value = 0;
+                this.ui.elements.frameDisplay.textContent = '0:00';
+                
+                // Ensure the video is fully reset before drawing the frame
+                this.state.videoElement.addEventListener('seeked', () => {
+                    this.videoManager.drawFrame();
+                }, { once: true });
             }
         }
     }
