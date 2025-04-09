@@ -1,4 +1,6 @@
 // Global variables
+const DEBUG = true;  // Debug flag
+
 let videoFile = null;
 let videoElement = null;
 let canvasElement = null;
@@ -358,6 +360,13 @@ function drawFrame() {
 function drawMasks(frameMasks) {
     if (!ctx) return;
     
+    if (DEBUG) {
+        console.log('Drawing masks for frame', currentFrame, {
+            objects: Object.keys(frameMasks).length,
+            objectIds: Object.keys(frameMasks)
+        });
+    }
+    
     // Create an offscreen canvas for mask composition
     const maskCanvas = document.createElement('canvas');
     maskCanvas.width = canvasElement.width;
@@ -449,6 +458,10 @@ async function handleTrackObjects() {
             prompts[frameIndex].push(...points);
         });
     });
+
+    if (DEBUG) {
+        console.log('Sending prompts to backend:', JSON.stringify(prompts, null, 2));
+    }
     
     try {
         isProcessing = true;
@@ -474,6 +487,19 @@ async function handleTrackObjects() {
         if (data.status === 'success') {
             // Store masks data
             masks = data.masks;
+            
+            if (DEBUG) {
+                console.log('Received masks from backend:', {
+                    totalFrames: Object.keys(masks).length,
+                    sampleFrame: Object.keys(masks)[0] ? {
+                        frameIndex: Object.keys(masks)[0],
+                        objects: Object.keys(masks[Object.keys(masks)[0]]).length,
+                        dimensions: masks[Object.keys(masks)[0]][objects[0].id] ? 
+                            `${masks[Object.keys(masks)[0]][objects[0].id].length}x${masks[Object.keys(masks)[0]][objects[0].id][0].length}` : 
+                            'no mask data'
+                    } : 'no frames'
+                });
+            }
             
             // Update UI to show masks
             drawFrame();

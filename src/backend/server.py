@@ -15,8 +15,13 @@ from sam2.build_sam import build_sam2_video_predictor
 import base64
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+DEBUG = True
 
 # Constants
 BASE_DIR = Path(__file__).parent.parent.parent
@@ -70,6 +75,10 @@ async def process_video_with_prompts(video_path: str, prompts: Dict[int, List[Di
         raise RuntimeError("SAM2 model not initialized")
     
     try:
+        if DEBUG:
+            logger.debug("\n=== Starting Video Processing ===")
+            logger.debug(f"Video path: {video_path}")
+        
         # Open the video
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -80,6 +89,12 @@ async def process_video_with_prompts(video_path: str, prompts: Dict[int, List[Di
         fps = cap.get(cv2.CAP_PROP_FPS)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        if DEBUG:
+            logger.debug(f"Video properties:")
+            logger.debug(f"- Total frames: {total_frames}")
+            logger.debug(f"- FPS: {fps}")
+            logger.debug(f"- Dimensions: {width}x{height}")
         
         # Initialize SAM2 state
         inference_state = sam2_predictor.init_state(
@@ -95,6 +110,9 @@ async def process_video_with_prompts(video_path: str, prompts: Dict[int, List[Di
         frame_indices = sorted(prompts.keys())
         
         for frame_idx in frame_indices:
+            if DEBUG:
+                logger.debug(f"\nProcessing frame {frame_idx}:")
+            
             # Set frame position - convert to float to avoid type error
             cap.set(cv2.CAP_PROP_POS_FRAMES, float(frame_idx))
             ret, frame = cap.read()
@@ -117,6 +135,11 @@ async def process_video_with_prompts(video_path: str, prompts: Dict[int, List[Di
                 points.append([prompt["x"], prompt["y"]])
                 labels.append(prompt["label"])
             
+            if DEBUG:
+                logger.debug(f"Processing {len(points)} points:")
+                for i, (point, label) in enumerate(zip(points, labels)):
+                    logger.debug(f"  Point {i + 1}: ({point[0]:.2f}, {point[1]:.2f}) - {'Positive' if label == 1 else 'Negative'}")
+            
             # Convert to numpy arrays
             points = np.array(points)
             labels = np.array(labels)
@@ -125,6 +148,9 @@ async def process_video_with_prompts(video_path: str, prompts: Dict[int, List[Di
             if len(points) > 0:
                 # Ensure frame_idx is an integer for the SAM2 model
                 frame_idx_int = int(frame_idx)
+                
+                if DEBUG:
+                    logger.debug(f"Calling SAM2 model with {len(points)} points")
                 
                 # Add points to the model
                 frame_idx, obj_ids, masks_frame = sam2_predictor.add_new_points_or_box(
@@ -136,11 +162,20 @@ async def process_video_with_prompts(video_path: str, prompts: Dict[int, List[Di
                     clear_old_points=True
                 )
                 
+                if DEBUG:
+                    logger.debug(f"Generated mask for frame {frame_idx}")
+                    if masks_frame is not None:
+                        logger.debug(f"Mask shape: {masks_frame.shape}")
+                
                 # Store mask
                 masks[frame_idx] = masks_frame.tolist()
         
         # Release video capture
         cap.release()
+        
+        if DEBUG:
+            logger.debug("\n=== Processing Complete ===")
+            logger.debug(f"Generated masks for {len(masks)} frames")
         
         return {
             "status": "success",
@@ -270,6 +305,19 @@ async def handle_process_video(request):
         filename = data.get('filename')
         prompts = data.get('prompts', {})
         
+        if DEBUG:
+            logger.debug("=== Received Video Processing Request ===")
+            logger.debug(f"Filename: {filename}")
+            logger.debug(f"Total frames with prompts: {len(prompts)}")
+            for frame_idx, frame_prompts in prompts.items():
+                logger.debug(f"\nFrame {frame_idx}:")
+                logger.debug(f"Number of points: {len(frame_prompts)}")
+                logger.debug("Points:")
+                for i, point in enumerate(frame_prompts):
+                    logger.debug(f"  Point {i + 1}:")
+                    logger.debug(f"    - Position: ({point['x']:.2f}, {point['y']:.2f})")
+                    logger.debug(f"    - Label: {point['label']} ({'Positive' if point['label'] == 1 else 'Negative'})")
+        
         if not filename:
             return web.json_response({"status": "error", "message": "No filename provided"}, status=400)
         
@@ -282,6 +330,13 @@ async def handle_process_video(request):
         try:
             # Process video with prompts
             masks = await process_video_with_prompts(video_info['path'], prompts)
+            
+            if DEBUG:
+                logger.debug("\n=== Processing Results ===")
+                logger.debug(f"Generated masks for {len(masks['masks'])} frames")
+                logger.debug(f"Video dimensions: {masks['width']}x{masks['height']}")
+                logger.debug(f"Total frames: {masks['total_frames']}")
+                logger.debug(f"FPS: {masks['fps']}")
             
             # Save masks
             mask_path = MASKS_DIR / f"{filename}_masks.json"
