@@ -813,9 +813,15 @@ class Application {
         });
         
         // Canvas handlers
-        this.state.canvasElement.addEventListener('click', (e) => this.objectManager.handleCanvasClick(e));
+        this.state.canvasElement.addEventListener('click', (e) => {
+            // Hide tooltip when user clicks on canvas
+            this.ui.hideTooltip();
+            this.objectManager.handleCanvasClick(e);
+        });
         this.state.canvasElement.addEventListener('contextmenu', (e) => {
             e.preventDefault();
+            // Hide tooltip when user right-clicks on canvas
+            this.ui.hideTooltip();
             this.objectManager.handleCanvasClick(e, true);
         });
         
