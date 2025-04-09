@@ -87,10 +87,6 @@ class UIManager {
             }
         });
         
-        document.querySelectorAll('.add-point-btn, .remove-point-btn').forEach(btn => {
-            btn.disabled = this.state.isProcessing;
-        });
-        
         this.elements.canvas.style.opacity = this.state.isProcessing ? '0.7' : '1';
     }
 
@@ -103,34 +99,12 @@ class UIManager {
                 </div>
                 <div class="object-label">${obj.label}</div>
                 <div class="object-controls">
-                    <button class="add-point-btn ${this.state.currentObjectId === obj.id && this.state.currentAction === 'add' ? 'active' : ''}" 
-                            data-action="add" data-id="${obj.id}">
-                        <span class="icon">+</span> Add
-                    </button>
-                    <button class="remove-point-btn ${this.state.currentObjectId === obj.id && this.state.currentAction === 'remove' ? 'active' : ''}" 
-                            data-action="remove" data-id="${obj.id}">
-                        <span class="icon">-</span> Remove
+                    <button class="remove-object-btn" title="Remove object">
+                        <span class="icon">×</span>
                     </button>
                 </div>
             </div>
         `).join('');
-        
-        this.attachObjectControlListeners();
-    }
-
-    attachObjectControlListeners() {
-        const objectsList = document.querySelector('.objects-list');
-        objectsList.querySelectorAll('.add-point-btn, .remove-point-btn').forEach(button => {
-            button.addEventListener('click', (e) => {
-                const action = e.target.closest('button').dataset.action;
-                const objectId = parseInt(e.target.closest('button').dataset.id);
-                
-                this.state.currentObjectId = objectId;
-                this.state.currentAction = action;
-                
-                this.updateObjectsList();
-            });
-        });
     }
 
     showWorkspace() {
