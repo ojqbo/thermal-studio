@@ -176,20 +176,24 @@ async function processFrame() {
         document.getElementById('processBtn').disabled = true;
         document.getElementById('processBtn').textContent = 'Processing...';
 
-        // Request frame from server
-        const response = await fetch('/frame-extraction', {
+        // Request frame processing from server
+        const response = await fetch('/process-frame', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                filename: currentVideoFile,
-                frame: video.currentTime
+                frame_idx: Math.floor(video.currentTime),
+                prompts: {
+                    x: currentFrame.width / 2,  // Center point
+                    y: currentFrame.height / 2,
+                    label: 1  // Positive point
+                }
             })
         });
 
         if (!response.ok) {
-            throw new Error(`Frame extraction failed: ${await response.text()}`);
+            throw new Error(`Frame processing failed: ${await response.text()}`);
         }
 
         const result = await response.json();
@@ -208,20 +212,37 @@ async function processFrame() {
 
 // Update segmentation and histogram with server response
 async function updateSegmentation(result) {
-    if (!result.frame_data) return;
+    if (!result.masks) return;
 
-    // Create image from base64 data
-    const img = new Image();
-    img.onload = () => {
-        // Draw segmentation
-        segmentationContext.clearRect(0, 0, segmentationCanvas.width, segmentationCanvas.height);
-        segmentationContext.drawImage(img, 0, 0, segmentationCanvas.width, segmentationCanvas.height);
+    // Create a canvas to draw the mask
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = segmentationCanvas.width;
+    maskCanvas.height = segmentationCanvas.height;
+    const maskCtx = maskCanvas.getContext('2d');
 
-        // Get image data for histogram
-        const imageData = segmentationContext.getImageData(0, 0, segmentationCanvas.width, segmentationCanvas.height);
-        updateHistogram(imageData);
-    };
-    img.src = 'data:image/jpeg;base64,' + result.frame_data;
+    // Create ImageData from the mask
+    const imageData = maskCtx.createImageData(maskCanvas.width, maskCanvas.height);
+    const data = imageData.data;
+
+    // Convert mask to RGBA
+    for (let i = 0; i < result.masks.length; i++) {
+        const maskValue = result.masks[i];
+        const idx = i * 4;
+        data[idx] = 0;     // R
+        data[idx + 1] = 255; // G
+        data[idx + 2] = 0;   // B
+        data[idx + 3] = maskValue * 128; // A (semi-transparent)
+    }
+
+    // Put the ImageData on the mask canvas
+    maskCtx.putImageData(imageData, 0, 0);
+
+    // Draw the mask on the segmentation canvas
+    segmentationContext.clearRect(0, 0, segmentationCanvas.width, segmentationCanvas.height);
+    segmentationContext.drawImage(maskCanvas, 0, 0);
+
+    // Update histogram with the mask data
+    updateHistogram(imageData);
 }
 
 // Update temperature histogram
