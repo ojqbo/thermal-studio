@@ -48,7 +48,7 @@
             </section>
 
             <div class="workspace" id="workspace" style="display: none;">
-                <aside class="sidebar">
+                <aside class="sidebar" id="selection-sidebar">
                     <div class="step-indicator">
                         <span class="step-number">2/3</span>
                         <h2>Select objects</h2>
@@ -83,6 +83,26 @@
                         </button>
                         <button class="primary-btn" id="track-objects">
                             Track objects <span class="icon">→</span>
+                        </button>
+                    </div>
+                </aside>
+
+                <aside class="sidebar" id="inspection-sidebar" style="display: none;">
+                    <div class="step-indicator">
+                        <span class="step-number">3/3</span>
+                        <h2>Inspect results</h2>
+                        <p class="step-description">
+                            Seek the video and check the detected objects.
+                        </p>
+                    </div>
+
+                    <div class="objects-list">
+                        <!-- Objects will be displayed here in inspection mode -->
+                    </div>
+
+                    <div class="bottom-controls">
+                        <button class="primary-btn" id="back-to-selection">
+                            <span class="icon">←</span> Back to selection
                         </button>
                     </div>
                 </aside>

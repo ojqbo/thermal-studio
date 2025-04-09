@@ -374,6 +374,16 @@ class ObjectManager {
         this.state = state;
         this.ui = ui;
         this.videoManager = videoManager;
+        this.canvasClickHandler = (e) => {
+            this.ui.hideTooltip();
+            this.handleCanvasClick(e);
+        };
+        this.canvasRightClickHandler = (e) => {
+            e.preventDefault();
+            this.ui.hideTooltip();
+            this.handleCanvasClick(e, true);
+        };
+        this.isInspectionMode = false;
     }
 
     setActiveObject(objectId) {
@@ -578,6 +588,80 @@ class ObjectManager {
         }
     }
 
+    switchToInspectionMode() {
+        this.isInspectionMode = true;
+        
+        // Hide selection sidebar and show inspection sidebar
+        const selectionSidebar = document.getElementById('selection-sidebar');
+        const inspectionSidebar = document.getElementById('inspection-sidebar');
+        
+        if (selectionSidebar) selectionSidebar.style.display = 'none';
+        if (inspectionSidebar) inspectionSidebar.style.display = 'block';
+        
+        // Disable point placement by removing canvas click handlers
+        this.state.canvasElement.removeEventListener('click', this.canvasClickHandler);
+        this.state.canvasElement.removeEventListener('contextmenu', this.canvasRightClickHandler);
+        
+        // Hide add object button and remove object buttons
+        const addObjectBtn = document.getElementById('add-object');
+        if (addObjectBtn) {
+            addObjectBtn.style.display = 'none';
+        }
+        
+        // Hide all remove object buttons
+        const removeButtons = document.querySelectorAll('.remove-object-btn');
+        removeButtons.forEach(btn => {
+            btn.style.display = 'none';
+        });
+        
+        // Update objects list in inspection mode
+        this.updateInspectionObjectsList();
+    }
+    
+    switchToSelectionMode() {
+        this.isInspectionMode = false;
+        
+        // Hide inspection sidebar and show selection sidebar
+        const selectionSidebar = document.getElementById('selection-sidebar');
+        const inspectionSidebar = document.getElementById('inspection-sidebar');
+        
+        if (selectionSidebar) selectionSidebar.style.display = 'block';
+        if (inspectionSidebar) inspectionSidebar.style.display = 'none';
+        
+        // Re-enable point placement by adding canvas click handlers
+        this.state.canvasElement.addEventListener('click', this.canvasClickHandler);
+        this.state.canvasElement.addEventListener('contextmenu', this.canvasRightClickHandler);
+        
+        // Show add object button and remove object buttons
+        const addObjectBtn = document.getElementById('add-object');
+        if (addObjectBtn) {
+            addObjectBtn.style.display = 'block';
+        }
+        
+        // Show all remove object buttons
+        const removeButtons = document.querySelectorAll('.remove-object-btn');
+        removeButtons.forEach(btn => {
+            btn.style.display = 'block';
+        });
+        
+        // Update objects list in selection mode
+        this.ui.updateObjectsList();
+    }
+    
+    updateInspectionObjectsList() {
+        const objectsList = document.querySelector('#inspection-sidebar .objects-list');
+        if (!objectsList) return;
+        
+        objectsList.innerHTML = Object.values(this.state.objects).map(obj => `
+            <div class="object-item ${obj.id === this.state.currentObjectId ? 'active' : ''}" data-id="${obj.id}">
+                <div class="object-preview">
+                    ${obj.thumbnail ? `<img src="${obj.thumbnail}" alt="${obj.label}">` : ''}
+                </div>
+                <div class="object-label">${obj.label}</div>
+            </div>
+        `).join('');
+    }
+
     async trackObjects() {
         if (!this.state.currentVideo) return;
         
@@ -600,6 +684,9 @@ class ObjectManager {
         try {
             this.state.isProcessing = true;
             this.ui.updateUIState();
+            
+            // Switch to inspection mode
+            this.switchToInspectionMode();
             
             const response = await fetch('/process-video', {
                 method: 'POST',
@@ -829,6 +916,12 @@ class Application {
         this.ui.elements.startOverBtn.addEventListener('click', () => this.objectManager.startOver());
         this.ui.elements.trackObjectsBtn.addEventListener('click', () => this.objectManager.trackObjects());
         
+        // Back to selection button handler
+        const backToSelectionBtn = document.getElementById('back-to-selection');
+        if (backToSelectionBtn) {
+            backToSelectionBtn.addEventListener('click', () => this.objectManager.switchToSelectionMode());
+        }
+        
         // Add click handler for object items
         document.querySelector('.objects-list').addEventListener('click', (e) => {
             const objectItem = e.target.closest('.object-item');
@@ -839,17 +932,8 @@ class Application {
         });
         
         // Canvas handlers
-        this.state.canvasElement.addEventListener('click', (e) => {
-            // Hide tooltip when user clicks on canvas
-            this.ui.hideTooltip();
-            this.objectManager.handleCanvasClick(e);
-        });
-        this.state.canvasElement.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            // Hide tooltip when user right-clicks on canvas
-            this.ui.hideTooltip();
-            this.objectManager.handleCanvasClick(e, true);
-        });
+        this.state.canvasElement.addEventListener('click', this.objectManager.canvasClickHandler);
+        this.state.canvasElement.addEventListener('contextmenu', this.objectManager.canvasRightClickHandler);
         
         // Tooltip handler
         this.ui.elements.tooltip.querySelector('.ok-btn').addEventListener('click', () => this.ui.hideTooltip());
