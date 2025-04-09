@@ -855,48 +855,35 @@ class Application {
             return;
         }
         
-        // File upload handlers
-        this.ui.elements.uploadArea.addEventListener('dragover', (e) => {
-            if (this.isUploading) return;  // Prevent drag during upload
+        // Add event listeners for file upload
+        this.ui.elements.dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            this.ui.elements.uploadArea.classList.add('drag-over');
+            this.ui.elements.dropZone.classList.add('dragover');
         });
-        
-        this.ui.elements.uploadArea.addEventListener('dragleave', (e) => {
-            if (this.isUploading) return;  // Prevent drag during upload
+
+        this.ui.elements.dropZone.addEventListener('dragleave', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            this.ui.elements.uploadArea.classList.remove('drag-over');
+            this.ui.elements.dropZone.classList.remove('dragover');
         });
-        
-        this.ui.elements.uploadArea.addEventListener('drop', (e) => {
-            if (this.isUploading) return;  // Prevent drop during upload
+
+        this.ui.elements.dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            this.ui.elements.uploadArea.classList.remove('drag-over');
+            this.ui.elements.dropZone.classList.remove('dragover');
             
-            const file = e.dataTransfer.files[0];
-            if (file && file.type.startsWith('video/')) {
-                this.fileManager.handleFile(file);
-            } else {
-                alert('Please drop a valid video file');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                this.fileManager.handleFile(files[0]);
             }
         });
-        
+
+        // Remove click event from drop zone and keep only the file input click
         this.ui.elements.fileInput.addEventListener('change', (e) => {
-            if (this.isUploading) return;  // Prevent file input change during upload
-            const file = e.target.files[0];
-            if (file && file.type.startsWith('video/')) {
-                this.fileManager.handleFile(file);
-            } else {
-                alert('Please select a valid video file');
+            if (e.target.files.length > 0) {
+                this.fileManager.handleFile(e.target.files[0]);
             }
-        });
-        
-        this.ui.elements.uploadArea.addEventListener('click', (e) => {
-            if (this.isUploading) return;  // Prevent click during upload
-            this.ui.elements.fileInput.click();
         });
         
         // Video control handlers
