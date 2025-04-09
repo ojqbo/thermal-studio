@@ -27,6 +27,7 @@ class AppState {
         this.maskOpacity = 0.5;
         this.objects = {};
         this.currentObjectId = null;
+        this.histograms = null;  // Store histograms data
     }
 
     reset() {
@@ -34,6 +35,7 @@ class AppState {
         this.isPlaying = false;
         this.objects = {};
         this.currentObjectId = 1;
+        this.histograms = null;  // Reset histograms
         
         // Create initial object
         this.objects[this.currentObjectId] = {
@@ -74,6 +76,8 @@ class UIManager {
             fileInput: document.getElementById('file-input'),
             fileInputLabel: document.querySelector('.primary-btn')
         };
+        this.histogramCanvas = document.getElementById('histogramCanvas');
+        this.histogramCtx = this.histogramCanvas ? this.histogramCanvas.getContext('2d') : null;
     }
 
     updateUIState() {
@@ -130,6 +134,8 @@ class VideoManager {
     constructor(state, ui) {
         this.state = state;
         this.ui = ui;
+        this.histogramCanvas = document.getElementById('histogramCanvas');
+        this.histogramCtx = this.histogramCanvas ? this.histogramCanvas.getContext('2d') : null;
     }
 
     async loadVideo(filename) {
@@ -180,6 +186,7 @@ class VideoManager {
         this.ui.elements.frameDisplay.textContent = this.formatTime(this.state.videoElement.currentTime);
         
         this.drawFrame();
+        this.updateHistogram();
         
         if (this.state.currentFrame < this.state.totalFrames - 1) {
             requestAnimationFrame(() => this.updatePlayback());
@@ -200,6 +207,12 @@ class VideoManager {
         // Draw masks and points
         this.drawMasks();
         this.drawPoints();
+        
+        // Draw histogram for current frame and active object
+        // Only draw if we're in inspection mode
+        if (this.ui.app.objectManager.isInspectionMode) {
+            this.drawHistogram();
+        }
     }
 
     drawMasks() {
@@ -346,6 +359,113 @@ class VideoManager {
         });
     }
 
+    drawHistogram() {
+        if (!this.histogramCtx || !this.state.histograms || !this.state.currentObjectId) return;
+
+        const frameHistograms = this.state.histograms.histograms[this.state.currentFrame];
+        if (!frameHistograms) return;
+
+        // Get histogram for current object (convert from 1-based to 0-based index)
+        const objectIndex = this.state.currentObjectId - 1;
+        const histograms = frameHistograms.map(channel => channel[objectIndex]); // Get RGB channels
+        const binEdges = this.state.histograms.bin_edges[0]; // Use first channel's bin edges
+
+        if (!histograms || !binEdges) return;
+
+        // Clear histogram canvas
+        this.histogramCtx.clearRect(0, 0, this.histogramCanvas.width, this.histogramCanvas.height);
+
+        // Set up histogram drawing
+        const width = this.histogramCanvas.width;
+        const height = this.histogramCanvas.height;
+        const padding = { top: 20, right: 30, bottom: 30, left: 40 };
+        const graphWidth = width - padding.left - padding.right;
+        const graphHeight = height - padding.top - padding.bottom;
+
+        // Draw background
+        this.histogramCtx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+        this.histogramCtx.fillRect(0, 0, width, height);
+
+        // Draw axes
+        this.histogramCtx.strokeStyle = '#666';
+        this.histogramCtx.lineWidth = 1;
+        this.histogramCtx.beginPath();
+        this.histogramCtx.moveTo(padding.left, padding.top);
+        this.histogramCtx.lineTo(padding.left, height - padding.bottom);
+        this.histogramCtx.lineTo(width - padding.right, height - padding.bottom);
+        this.histogramCtx.stroke();
+
+        // Find max value across all channels for scaling
+        const maxValue = Math.max(...histograms.map(h => Math.max(...h)));
+
+        // Draw histogram lines for each channel
+        const channelColors = ['#FF4444', '#44FF44', '#4444FF'];
+        const barWidth = graphWidth / 256; // 256 bins
+
+        histograms.forEach((histogram, channelIndex) => {
+            this.histogramCtx.strokeStyle = channelColors[channelIndex];
+            this.histogramCtx.lineWidth = 1;
+            this.histogramCtx.beginPath();
+            
+            histogram.forEach((value, i) => {
+                const x = padding.left + i * barWidth;
+                const y = height - padding.bottom - (value / maxValue) * graphHeight;
+                
+                if (i === 0) {
+                    this.histogramCtx.moveTo(x, y);
+                } else {
+                    this.histogramCtx.lineTo(x, y);
+                }
+            });
+            
+            this.histogramCtx.stroke();
+        });
+
+        // Draw labels
+        this.histogramCtx.fillStyle = '#fff';
+        this.histogramCtx.font = '10px Arial';
+        
+        // X-axis labels
+        const numXLabels = 5;
+        this.histogramCtx.textAlign = 'center';
+        this.histogramCtx.textBaseline = 'top';
+        for (let i = 0; i <= numXLabels; i++) {
+            const x = padding.left + (i / numXLabels) * graphWidth;
+            const binIndex = Math.floor((i / numXLabels) * 255);
+            this.histogramCtx.fillText(binIndex.toString(), x, height - padding.bottom + 5);
+        }
+
+        // Y-axis labels
+        const numYLabels = 5;
+        this.histogramCtx.textAlign = 'right';
+        this.histogramCtx.textBaseline = 'middle';
+        for (let i = 0; i <= numYLabels; i++) {
+            const y = height - padding.bottom - (i / numYLabels) * graphHeight;
+            const value = Math.round((i / numYLabels) * maxValue);
+            this.histogramCtx.fillText(value.toString(), padding.left - 5, y);
+        }
+
+        // Draw channel legend
+        const legendItems = ['R', 'G', 'B'];
+        const legendWidth = 15;
+        const legendSpacing = 40;
+        const legendY = padding.top + 10;
+
+        legendItems.forEach((item, i) => {
+            const x = padding.left + i * legendSpacing;
+            
+            // Draw color box
+            this.histogramCtx.fillStyle = channelColors[i];
+            this.histogramCtx.fillRect(x, legendY, legendWidth, legendWidth);
+            
+            // Draw label
+            this.histogramCtx.fillStyle = '#fff';
+            this.histogramCtx.textAlign = 'left';
+            this.histogramCtx.textBaseline = 'middle';
+            this.histogramCtx.fillText(item, x + legendWidth + 5, legendY + legendWidth/2);
+        });
+    }
+
     parseRGBA(rgba) {
         const match = rgba.match(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/);
         if (match) {
@@ -363,6 +483,12 @@ class VideoManager {
         const mins = Math.floor(seconds / 60);
         const secs = Math.floor(seconds % 60);
         return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    updateHistogram() {
+        if (this.ui.app.objectManager.isInspectionMode) {
+            requestAnimationFrame(() => this.drawHistogram());
+        }
     }
 }
 
@@ -391,6 +517,8 @@ class ObjectManager {
         // Also update the inspection mode objects list if we're in inspection mode
         if (this.isInspectionMode) {
             this.updateInspectionObjectsList();
+            // Update the histogram for the newly selected object
+            this.videoManager.updateHistogram();
         }
     }
 
@@ -743,6 +871,16 @@ class ObjectManager {
                 <div class="object-label">${obj.label}</div>
             </div>
         `).join('');
+
+        // Add click handler for inspection mode object items
+        objectsList.querySelectorAll('.object-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const objectId = parseInt(item.dataset.id);
+                this.setActiveObject(objectId);
+                // Redraw the histogram for the newly selected object
+                this.videoManager.drawHistogram();
+            });
+        });
     }
 
     async trackObjects() {
@@ -792,6 +930,9 @@ class ObjectManager {
             if (data.status === 'success') {
                 // Initialize masks for all frames
                 this.state.masks = {};
+                
+                // Store histograms data
+                this.state.histograms = data.histograms;
                 
                 // Process masks for each frame
                 Object.entries(data.masks).forEach(([frameIdx, maskData]) => {
@@ -1047,6 +1188,36 @@ class Application {
         
         // Tooltip handler
         this.ui.elements.tooltip.querySelector('.ok-btn').addEventListener('click', () => this.ui.hideTooltip());
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            if (this.state.canvasElement) {
+                const container = this.state.canvasElement.parentElement;
+                const containerWidth = container.clientWidth;
+                const containerHeight = container.clientHeight;
+                
+                // Maintain aspect ratio
+                const aspectRatio = this.state.videoWidth / this.state.videoHeight;
+                let width = containerWidth;
+                let height = width / aspectRatio;
+                
+                if (height > containerHeight) {
+                    height = containerHeight;
+                    width = height * aspectRatio;
+                }
+                
+                this.state.canvasElement.style.width = `${width}px`;
+                this.state.canvasElement.style.height = `${height}px`;
+            }
+
+            // Resize histogram canvas
+            if (this.videoManager.histogramCanvas) {
+                const container = this.videoManager.histogramCanvas.parentElement;
+                this.videoManager.histogramCanvas.width = container.clientWidth;
+                this.videoManager.histogramCanvas.height = 150;
+                this.videoManager.drawHistogram();
+            }
+        });
     }
 }
 
