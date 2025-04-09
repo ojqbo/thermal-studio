@@ -355,11 +355,16 @@ async def handle_process_video(request):
             
             # compute histograms
             histograms = compute_histograms(masks_dict, current_video_path)
+            # convert histograms to a format that can be serialized to JSON
+            histograms_json = {
+                "histograms": {str(k): v.tolist() for k, v in histograms["histograms"].items()},
+                "bin_edges": histograms["bin_edges"].tolist()
+            }
             
             return web.json_response({
                 "status": "success",
                 "masks": masks_json,
-                "histograms": histograms
+                "histograms": histograms_json
             })
             
         except Exception as e:
