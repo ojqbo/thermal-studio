@@ -805,9 +805,11 @@ class ObjectManager {
         // Hide selection sidebar and show inspection sidebar
         const selectionSidebar = document.getElementById('selection-sidebar');
         const inspectionSidebar = document.getElementById('inspection-sidebar');
+        const histogramContainer = document.querySelector('.histogram-container');
         
         if (selectionSidebar) selectionSidebar.style.display = 'none';
         if (inspectionSidebar) inspectionSidebar.style.display = 'block';
+        if (histogramContainer) histogramContainer.style.display = 'block';
         
         // Disable point placement by removing canvas click handlers
         this.state.canvasElement.removeEventListener('click', this.canvasClickHandler);
@@ -835,9 +837,11 @@ class ObjectManager {
         // Hide inspection sidebar and show selection sidebar
         const selectionSidebar = document.getElementById('selection-sidebar');
         const inspectionSidebar = document.getElementById('inspection-sidebar');
+        const histogramContainer = document.querySelector('.histogram-container');
         
         if (selectionSidebar) selectionSidebar.style.display = 'block';
         if (inspectionSidebar) inspectionSidebar.style.display = 'none';
+        if (histogramContainer) histogramContainer.style.display = 'none';
         
         // Re-enable point placement by adding canvas click handlers
         this.state.canvasElement.addEventListener('click', this.canvasClickHandler);
