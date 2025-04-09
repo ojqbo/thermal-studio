@@ -82,7 +82,39 @@
                         <canvas id="canvas"></canvas>
                         <div class="tooltip" id="tooltip">
                             <p>Tip: Not what you expected? Add a few more clicks until the full object you want is selected.</p>
-                            <a href="#" class="learn-more">Learn more</a>
+                            <div class="mouse-diagram" style="display: flex; align-items: center;">
+                                <svg width="60" height="80" viewBox="0 0 60 80">
+                                    <!-- Mouse body -->
+                                    <path d="M15,25 Q15,10 30,10 Q45,10 45,25 L45,55 Q45,70 30,70 Q15,70 15,55 Z" 
+                                          fill="#e0e0e0" 
+                                          stroke="#666" 
+                                          stroke-width="2"/>
+                                    <!-- Left button (green) -->
+                                    <path d="M15,25 Q15,10 30,10 L30,35 L15,35 Z" 
+                                          fill="#4CAF50" 
+                                          stroke="#666" 
+                                          stroke-width="1"/>
+                                    <!-- Right button (red) -->  
+                                    <path d="M30,10 Q45,10 45,25 L45,35 L30,35 Z" 
+                                          fill="#f44336" 
+                                          stroke="#666" 
+                                          stroke-width="1"/>
+                                    <!-- Scroll wheel -->
+                                    <rect x="27" y="20" width="6" height="10" 
+                                          fill="#999" 
+                                          rx="2"/>
+                                </svg>
+                                <div style="margin-left: 10px; width: 200px;">
+                                    <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                                        <div style="width: 12px; height: 12px; background: #4CAF50; border-radius: 50%; margin-right: 8px;"></div>
+                                        <span style="font-size: 0.85rem;">Add positive prompt-point</span>
+                                    </div>
+                                    <div style="display: flex; align-items: center;">
+                                        <div style="width: 12px; height: 12px; background: #f44336; border-radius: 50%; margin-right: 8px;"></div>
+                                        <span style="font-size: 0.85rem;">Add negative prompt-point</span>
+                                    </div>
+                                </div>
+                            </div>
                             <button class="ok-btn">Ok</button>
                         </div>
                     </div>
