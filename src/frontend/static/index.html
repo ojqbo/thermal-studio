@@ -10,13 +10,11 @@
     <div class="app-container">
         <header class="app-header">
             <div class="header-left">
-                <h1>Segment Anything 2 Demo</h1>
-                <p class="subtitle">A Meta FAIR Demo</p>
+                <h1>Thermal Studio</h1>
+                <p class="subtitle">A tool to view histogram of the masked objects in a video, powered by Segment Anything 2 model</p>
             </div>
             <nav class="header-nav">
-                <a href="#about">About</a>
-                <a href="#dataset">Dataset</a>
-                <a href="#demos">AI Demos</a>
+                <a href="#about">About</a>  <!-- TODO: Add about popup, with the relevant information from readme -->
             </nav>
         </header>
 
@@ -46,11 +44,11 @@
                             </div>
                             <div class="object-label">Object 1</div>
                             <div class="object-controls">
-                                <button class="add-point-btn" data-action="add">
-                                    <span class="icon">+</span> Add
+                                <button class="add-point-btn" data-action="add"> <!-- TODO: rename add-point-btn to add-positive-prompt-btn, rename data-action="add" to data-action="add-positive-prompt" -->
+                                    <span class="icon">+</span> Add a positive prompt-point
                                 </button>
-                                <button class="remove-point-btn" data-action="remove">
-                                    <span class="icon">-</span> Remove
+                                <button class="remove-point-btn" data-action="remove"> <!-- TODO: rename remove-point-btn to add-negative-prompt-btn, rename data-action="remove" to data-action="add-negative-prompt" -->
+                                    <span class="icon">-</span> Add a negative prompt-point
                                 </button>
                             </div>
                         </div>
