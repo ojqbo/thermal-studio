@@ -417,11 +417,15 @@ class ObjectManager {
             this.state.objects[this.state.currentObjectId].points = [];
         }
         
+        // Store the current frame index with the point
+        const currentFrameIdx = this.state.currentFrame;
+        
         this.state.objects[this.state.currentObjectId].points.push({
             x: scaledX,
             y: scaledY,
             label: isRightClick ? 0 : 1,  // 0 for negative prompts (right click), 1 for positive prompts (left click)
-            obj_id: this.state.currentObjectId
+            obj_id: this.state.currentObjectId,
+            frame_idx: currentFrameIdx  // Store the frame index at the time of point creation
         });
         
         await this.processFrame();
@@ -437,7 +441,8 @@ class ObjectManager {
                     x: point.x,
                     y: point.y,
                     label: point.label,
-                    obj_id: point.obj_id - 1  // Convert to 0-based index for backend
+                    obj_id: point.obj_id - 1,  // Convert to 0-based index for backend
+                    frame_idx: point.frame_idx
                 })));
             }
         }
@@ -464,35 +469,29 @@ class ObjectManager {
             console.log('Received mask result:', result);
             
             if (result.masks) {
-                if (!this.state.masks[this.state.currentFrame]) {
-                    this.state.masks[this.state.currentFrame] = {};
-                }
-                
-                // Store masks for all objects
-                if (Array.isArray(result.masks) && result.masks.length > 0) {
-                    // If it's a 3D array [num_objects, height, width]
-                    if (Array.isArray(result.masks[0]) && Array.isArray(result.masks[0][0])) {
-                        console.log('Processing 3D mask array with shape:', [
-                            result.masks.length,
-                            result.masks[0].length,
-                            result.masks[0][0].length
-                        ]);
-                        // Store each object's mask
-                        for (let i = 0; i < result.masks.length; i++) {
-                            const objectId = i + 1; // Convert to 1-based index for frontend
-                            this.state.masks[this.state.currentFrame][objectId] = result.masks;
-                            console.log(`Stored mask for object ${objectId}`);
-                        }
-                    } else {
-                        console.log('Processing 2D mask array with shape:', [
-                            result.masks.length,
-                            result.masks[0].length
-                        ]);
-                        // If it's a 2D array [height, width], store it for the current object
-                        this.state.masks[this.state.currentFrame][this.state.currentObjectId] = result.masks;
-                        console.log(`Stored mask for current object ${this.state.currentObjectId}`);
+                // Process each frame's masks in the response
+                Object.entries(result.masks).forEach(([frameIdx, maskData]) => {
+                    // Initialize masks for this frame if not exists
+                    if (!this.state.masks[frameIdx]) {
+                        this.state.masks[frameIdx] = {};
                     }
-                }
+                    
+                    // Store the mask data for each object that was processed
+                    // The backend returns masks for each object ID
+                    Object.entries(maskData).forEach(([objId, mask]) => {
+                        // Convert from 0-based backend index to 1-based frontend index
+                        const frontendObjId = parseInt(objId) + 1;
+                        
+                        // Store the mask for this object
+                        this.state.masks[frameIdx][frontendObjId] = mask;
+                        
+                        console.log(`Stored mask for frame ${frameIdx}, object ${frontendObjId}:`, {
+                            maskDimensions: Array.isArray(mask) ? 
+                                `${mask.length}x${Array.isArray(mask[0]) ? mask[0].length : 'unknown'}` : 
+                                'unknown format'
+                        });
+                    });
+                });
                 
                 console.log('Current frame masks:', this.state.masks[this.state.currentFrame]);
                 this.videoManager.drawFrame();
@@ -513,7 +512,8 @@ class ObjectManager {
                     x: point.x,
                     y: point.y,
                     label: point.label,
-                    obj_id: point.obj_id - 1  // Convert to 0-based index for backend
+                    obj_id: point.obj_id - 1,  // Convert to 0-based index for backend
+                    frame_idx: point.frame_idx
                 })));
             }
         }
@@ -547,28 +547,27 @@ class ObjectManager {
                 this.state.masks = {};
                 
                 // Process masks for each frame
-                Object.entries(data.masks).forEach(([frameIdx, frameMasks]) => {
-                    this.state.masks[frameIdx] = {};
-                    
-                    // If it's a 3D array [num_objects, height, width]
-                    if (Array.isArray(frameMasks) && frameMasks.length > 0 && 
-                        Array.isArray(frameMasks[0]) && Array.isArray(frameMasks[0][0])) {
-                        
-                        console.log(`Processing frame ${frameIdx} masks with shape:`, [
-                            frameMasks.length,
-                            frameMasks[0].length,
-                            frameMasks[0][0].length
-                        ]);
-                        
-                        // Store each object's mask
-                        for (let i = 0; i < frameMasks.length; i++) {
-                            const objectId = i + 1; // Convert to 1-based index for frontend
-                            this.state.masks[frameIdx][objectId] = frameMasks;
-                            console.log(`Stored mask for object ${objectId} in frame ${frameIdx}`);
-                        }
-                    } else {
-                        console.warn(`Unexpected mask format for frame ${frameIdx}:`, frameMasks);
+                Object.entries(data.masks).forEach(([frameIdx, maskData]) => {
+                    // Initialize masks for this frame if not exists
+                    if (!this.state.masks[frameIdx]) {
+                        this.state.masks[frameIdx] = {};
                     }
+                    
+                    // Store the mask data for each object that was processed
+                    // The backend returns masks for each object ID
+                    Object.entries(maskData).forEach(([objId, mask]) => {
+                        // Convert from 0-based backend index to 1-based frontend index
+                        const frontendObjId = parseInt(objId) + 1;
+                        
+                        // Store the mask for this object
+                        this.state.masks[frameIdx][frontendObjId] = mask;
+                        
+                        console.log(`Stored mask for frame ${frameIdx}, object ${frontendObjId}:`, {
+                            maskDimensions: Array.isArray(mask) ? 
+                                `${mask.length}x${Array.isArray(mask[0]) ? mask[0].length : 'unknown'}` : 
+                                'unknown format'
+                        });
+                    });
                 });
                 
                 console.log('Processed all frame masks:', this.state.masks);

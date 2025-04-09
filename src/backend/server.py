@@ -21,6 +21,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+torch.autocast("cpu", dtype=torch.bfloat16).__enter__()
+
 DEBUG = True
 
 # Constants
@@ -49,6 +51,7 @@ class PromptPoint(TypedDict):
     y: float
     label: int  # 1 for positive, 0 for negative
     obj_id: int  # object id of the prompt point
+    frame_idx: int  # frame index of the prompt point
 
 # Initialize SAM2 model
 async def init_sam2():
@@ -63,8 +66,39 @@ async def init_sam2():
         logger.error(f"Error initializing SAM2: {e}")
         return False
 
+async def get_mask_of_a_single_frame(sam2_predictor, frame_idx: int) -> np.ndarray:
+    """Process all frames of the video with the prompts applied by the user so far.
+
+    Args:
+        sam2_predictor: The SAM2 predictor object, with proper state of prompts.
+        frame_idx: The index of the frame to process.
+    Returns:
+        Masks for all frames of shape (C, H, W), where:
+            - C is the number of channels,
+            - H is the height,
+            - W is the width.
+        The masks are returned as a numpy array of type uint8, of values 0 and 1,
+        where 1 means the pixel is part of the mask.
+    """
+    global inference_state
+    
+    if inference_state is None:
+        raise RuntimeError("Inference state not initialized. Please upload a video first.")
+    
+    for _frame_idx, object_ids, masks in sam2_predictor.propagate_in_video(
+            inference_state=inference_state,
+            start_frame_idx=frame_idx,
+            max_frame_num_to_track=frame_idx + 1,
+        ):
+        if frame_idx != _frame_idx:
+            logger.warning(f"Frame index mismatch: {frame_idx} != {_frame_idx}")
+        masks = masks.detach().cpu().numpy()
+        masks = masks[:, 0]  # Remove batch dimension
+        masks = (masks > 0).astype(np.uint8)
+        return masks
+
 # Process frame with prompts
-async def process_frame_with_prompts(frame_idx: int, prompts: List[PromptPoint]) -> np.ndarray:
+async def process_frame_with_prompts(all_prompts: List[PromptPoint]) -> Dict[int, np.ndarray]:
     """
     Process a frame with the given prompts using SAM2.
 
@@ -75,31 +109,33 @@ async def process_frame_with_prompts(frame_idx: int, prompts: List[PromptPoint])
     return masks for all frames, but this function will not be used then.
     
     Args:
-        frame_idx: Index of the frame to process
-        prompts: List of prompt points with x, y coordinates, a label (positive, negative prompt) and an object id
+        all_prompts: List of prompt points with x, y coordinates, a label (positive, negative prompt), 
+                    an object id, and a frame index
         
     Returns:
-        numpy array of the mask of shape (C, H, W)
+        Mapping of frame_idx to numpy array of the mask of shape (C, H, W).
+        The whole video will not be processed. Only the frames present in all_prompts will be processed.
     """
     global sam2_predictor
-    
+
     if sam2_predictor is None:
         raise RuntimeError("SAM2 model not initialized")
-    
+
     try:
         if DEBUG:
             logger.debug("\n=== Starting Video Processing ===")
-            logger.debug(f"\nProcessing frame {frame_idx}:")
-            logger.debug(f"\nPrompts: {prompts}")
+            logger.debug(f"\nPrompts: {all_prompts}")
+
+        sam2_predictor.reset_state(inference_state)
+
+        # group prompts by (frame_index, object_id) tuple
+        prompts_by_frame_idx_and_obj_id = {}
+        for prompt in all_prompts:
+            if (prompt["frame_idx"], prompt["obj_id"]) not in prompts_by_frame_idx_and_obj_id:
+                prompts_by_frame_idx_and_obj_id[(prompt["frame_idx"], prompt["obj_id"])] = []
+            prompts_by_frame_idx_and_obj_id[(prompt["frame_idx"], prompt["obj_id"])].append(prompt)
         
-        # group prompts by object id
-        prompts_by_obj_id = {}
-        for prompt in prompts:
-            if prompt["obj_id"] not in prompts_by_obj_id:
-                prompts_by_obj_id[prompt["obj_id"]] = []
-            prompts_by_obj_id[prompt["obj_id"]].append(prompt)
-        
-        for obj_id, prompts in prompts_by_obj_id.items():
+        for (frame_idx, obj_id), prompts in prompts_by_frame_idx_and_obj_id.items():
             # Prepare points and labels
             points = []
             labels = []
@@ -116,7 +152,7 @@ async def process_frame_with_prompts(frame_idx: int, prompts: List[PromptPoint])
                     labels.append(prompt["label"])
             
             if DEBUG:
-                logger.debug(f"Processing {len(points)} points:")
+                logger.debug(f"Processing {len(points)} points for object {obj_id} in frame {frame_idx}:")
                 for i, (point, label) in enumerate(zip(points, labels)):
                     logger.debug(f"  Point {i + 1}: ({point[0]:.2f}, {point[1]:.2f}) - {'Positive' if label > 0 else 'Negative'}, {label=}")
             
@@ -124,7 +160,6 @@ async def process_frame_with_prompts(frame_idx: int, prompts: List[PromptPoint])
             points = np.array(points)
             labels = np.array(labels)
             
-            masks_frame = None
             # Process frame with SAM2
             if len(points) > 0:            
                 if DEBUG:
@@ -150,17 +185,13 @@ async def process_frame_with_prompts(frame_idx: int, prompts: List[PromptPoint])
                     if masks_frame is not None:
                         logger.debug(f"Mask shape: {masks_frame.shape}")
                 
-        # Store mask directly as returned by SAM2
-        if masks_frame is not None:
-            masks_frame = masks_frame.detach().cpu().numpy()
-            masks_frame = masks_frame[:, 0]  # Remove batch dimension
-            masks_frame = (masks_frame > 0).astype(np.uint8)
-
-        if DEBUG:
-            logger.debug("\n=== Processing Complete ===")
-            logger.debug(f"Masks shape: {masks_frame.shape}")
-            
-        return masks_frame
+        # Get masks for all frames that have prompts
+        result = {}
+        for frame_idx in list(set([prompt["frame_idx"] for prompt in all_prompts])):
+            masks_frame = await get_mask_of_a_single_frame(sam2_predictor, frame_idx)
+            result[frame_idx] = masks_frame
+        
+        return result
     
     except Exception as e:
         logger.error(f"Error processing video: {e}")
@@ -264,35 +295,24 @@ async def handle_upload(request):
             os.remove(str(file_path))
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
-async def process_video_with_prompts(sam2_predictor) -> List[tuple[int, np.ndarray]]:
-    """Process all frames of the video with the prompts applied by the user so far.
+async def process_video_with_prompts(sam2_predictor) -> Dict[int, np.ndarray]:
+    """Process the entire video with the prompts applied by the user so far.
 
     Args:
         sam2_predictor: The SAM2 predictor object, with proper state of prompts.
-        
     Returns:
-        Masks for all frames of shape (N, C, H, W), where:
-            - N is the number of frames,
+        Mapping of frame_idx to numpy array of the mask of shape (C, H, W).
+        Masks for all frames are of shape (C, H, W), where:
             - C is the number of channels,
             - H is the height,
             - W is the width.
         The masks are returned as a numpy array of type uint8, of values 0 and 1,
         where 1 means the pixel is part of the mask.
     """
-    global inference_state
-    
-    if inference_state is None:
-        raise RuntimeError("Inference state not initialized. Please upload a video first.")
-    
-    # propagate the prompts to get masklets throughout the video
-    for frame_idx, object_ids, masks in sam2_predictor.propagate_in_video(
-            inference_state=inference_state,
-            start_frame_idx=0
-        ):
-        masks = masks.detach().cpu().numpy()
-        masks = masks[:, 0]  # Remove batch dimension
-        masks = (masks > 0).astype(np.uint8)
-        yield frame_idx, masks
+    for frame_idx in range(inference_state["num_frames"]):
+        mask = await get_mask_of_a_single_frame(sam2_predictor, frame_idx)
+        yield frame_idx, mask
+
 
 async def handle_process_video(request):
     """Handle video processing with prompts applied by the user so far"""
@@ -312,25 +332,28 @@ async def handle_process_video(request):
         # Process video with SAM2
         try:
             # Process video with prompts
-            masks = []
+            masks_dict = {}
             async for frame_idx, mask in process_video_with_prompts(sam2_predictor):
-                masks.append(mask)
-            masks = np.array(masks)
+                masks_dict[frame_idx] = mask
             
             if DEBUG:
                 logger.debug("\n=== Processing Results ===")
-                logger.debug(f"Generated masks for {len(masks)} frames, masks shape: {masks.shape}")
+                logger.debug(f"Generated masks for {len(masks_dict)} frames")
+            
+            # Convert the masks to a format that can be serialized to JSON
+            masks_json = {str(k): v.tolist() for k, v in masks_dict.items()}
             
             # Save masks
             mask_path = MASKS_DIR / f"last_video_masks.json"
             async with aiofiles.open(mask_path, 'w') as f:
                 await f.write(json.dumps({
-                    'masks': masks.tolist()
+                    'masks': masks_json
                 }))
+            
             
             return web.json_response({
                 "status": "success",
-                "masks": masks.tolist()
+                "masks": masks_json
             })
             
         except Exception as e:
@@ -378,11 +401,15 @@ async def handle_process_frame(request):
         
         # Process frame with prompts
         try:
-            masks = await process_frame_with_prompts(frame_idx, prompts)
+            # Process the frame with prompts
+            masks_dict = await process_frame_with_prompts(prompts)
+            
+            # Convert the masks to a format that can be serialized to JSON
+            masks_json = {str(k): v.tolist() for k, v in masks_dict.items()}
             
             return web.json_response({
                 "status": "success",
-                "masks": masks.tolist()
+                "masks": masks_json
             })
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
