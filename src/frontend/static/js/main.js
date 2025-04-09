@@ -405,6 +405,86 @@ class ObjectManager {
         this.ui.updateObjectsList();
     }
 
+    removeObject(objectId) {
+        if (Object.keys(this.state.objects).length <= 1) {
+            alert("Cannot remove the last object. Use 'Start Over' to reset all objects.");
+            return;
+        }
+        
+        // Remove the object
+        delete this.state.objects[objectId];
+        
+        // Create ID mapping from old to new
+        const objectKeys = Object.keys(this.state.objects).map(id => parseInt(id));
+        const idMapping = {};
+        objectKeys.sort((a, b) => a - b).forEach((oldId, index) => {
+            idMapping[oldId] = index + 1;
+        });
+        
+        // Remap the remaining object IDs to be sequential from 1 to N-1
+        const remappedObjects = {};
+        
+        // Create a new object with remapped IDs
+        objectKeys.forEach(oldId => {
+            const newId = idMapping[oldId];
+            const oldObject = this.state.objects[oldId];
+            
+            // Create a new object with the updated ID
+            remappedObjects[newId] = {
+                ...oldObject,
+                id: newId,
+                label: `Object ${newId}`,
+                color: MASK_COLORS[(newId - 1) % MASK_COLORS.length]
+            };
+            
+            // Update any points that reference this object
+            if (Array.isArray(remappedObjects[newId].points)) {
+                remappedObjects[newId].points = remappedObjects[newId].points.map(point => ({
+                    ...point,
+                    obj_id: newId
+                }));
+            }
+        });
+        
+        // Replace the old objects with the remapped ones
+        this.state.objects = remappedObjects;
+        
+        // Update all masks to use the new object IDs
+        if (this.state.masks) {
+            const remappedMasks = {};
+            
+            Object.entries(this.state.masks).forEach(([frameIdx, frameMasks]) => {
+                remappedMasks[frameIdx] = {};
+                
+                Object.entries(frameMasks).forEach(([oldObjId, mask]) => {
+                    // Skip the removed object
+                    if (parseInt(oldObjId) === objectId) return;
+                    
+                    // Map to new ID or keep the same if not in mapping
+                    const newObjId = idMapping[oldObjId] || oldObjId;
+                    remappedMasks[frameIdx][newObjId] = mask;
+                });
+            });
+            
+            this.state.masks = remappedMasks;
+        }
+        
+        // If the removed object was the current one, set a new current object
+        if (this.state.currentObjectId === objectId) {
+            // Set the current object to the first available one
+            this.state.currentObjectId = 1;
+        } else {
+            // Map the current object ID to its new ID
+            this.state.currentObjectId = idMapping[this.state.currentObjectId] || 1;
+        }
+        
+        // Update the UI
+        this.ui.updateObjectsList();
+        
+        // Redraw the frame to update the display
+        this.videoManager.drawFrame();
+    }
+
     startOver() {
         if (confirm('Are you sure you want to start over? All points will be cleared.')) {
             // Clear all objects, points, and masks
@@ -915,6 +995,16 @@ class Application {
             if (objectItem && !e.target.closest('.remove-object-btn')) {
                 const objectId = parseInt(objectItem.dataset.id);
                 this.objectManager.setActiveObject(objectId);
+            }
+        });
+        
+        // Add click handler for remove object buttons
+        document.querySelector('.objects-list').addEventListener('click', (e) => {
+            const removeBtn = e.target.closest('.remove-object-btn');
+            if (removeBtn) {
+                const objectItem = removeBtn.closest('.object-item');
+                const objectId = parseInt(objectItem.dataset.id);
+                this.objectManager.removeObject(objectId);
             }
         });
         
