@@ -1,3 +1,4 @@
 reference
 venv
 data
+__pycache__

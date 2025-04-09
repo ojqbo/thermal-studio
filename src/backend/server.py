@@ -14,6 +14,8 @@ import torch
 from sam2.build_sam import build_sam2_video_predictor
 import base64
 
+from insights import compute_histograms
+
 # Configure logging
 logging.basicConfig(
     level=logging.DEBUG,
@@ -45,6 +47,7 @@ MODEL_DIR.mkdir(parents=True, exist_ok=True)
 sam2_predictor = None
 video_cache = {}
 inference_state = None
+current_video_path = None  # Add global variable to track current video path
 
 class PromptPoint(TypedDict):
     x: float
@@ -221,7 +224,7 @@ async def process_frame_with_prompts(all_prompts: List[PromptPoint]) -> Dict[int
 # API Routes
 async def handle_upload(request):
     """Handle video upload"""
-    global inference_state
+    global inference_state, current_video_path
     try:
         # Check if SAM2 is initialized
         if sam2_predictor is None:
@@ -285,6 +288,9 @@ async def handle_upload(request):
                 offload_state_to_cpu=True   # Save GPU memory
             )
             
+            # Store the current video path
+            current_video_path = str(file_path)
+            
             # Cache video info using the unique filename
             video_cache[unique_filename] = {
                 "path": str(file_path),
@@ -319,6 +325,7 @@ async def handle_upload(request):
 
 async def handle_process_video(request):
     """Handle video processing with prompts applied by the user so far"""
+    global current_video_path
     try:
         # Check if SAM2 is initialized
         if sam2_predictor is None:
@@ -346,17 +353,13 @@ async def handle_process_video(request):
             # Convert the masks to a format that can be serialized to JSON
             masks_json = {str(k): v.tolist() for k, v in masks_dict.items()}
             
-            # Save masks
-            mask_path = MASKS_DIR / f"last_video_masks.json"
-            async with aiofiles.open(mask_path, 'w') as f:
-                await f.write(json.dumps({
-                    'masks': masks_json
-                }))
-            
+            # compute histograms
+            histograms = compute_histograms(masks_dict, current_video_path)
             
             return web.json_response({
                 "status": "success",
-                "masks": masks_json
+                "masks": masks_json,
+                "histograms": histograms
             })
             
         except Exception as e:
