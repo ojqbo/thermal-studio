@@ -345,62 +345,57 @@ canvas {
 
 /* Upload section */
 .upload-section {
-    width: 100%;
-    max-width: 800px;
-    margin: 2rem auto;
-    padding: 0 1rem;
+    display: flex;
+    flex: 1;
+    height: calc(100vh - 4rem);
+}
+
+.upload-panel {
+    width: 360px;
+    background-color: var(--surface-color);
+    padding: 2rem;
+    border-right: 1px solid var(--border-color);
 }
 
 .upload-area {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--background-color);
+    padding: 2rem;
+}
+
+.drop-zone {
     border: 2px dashed var(--border-color);
     border-radius: 8px;
-    padding: 2rem;
+    padding: 3rem;
     text-align: center;
-    background-color: var(--surface-color);
-    transition: all 0.3s ease;
-    cursor: pointer;
+    background-color: rgba(26, 26, 26, 0.6);
+    width: 100%;
+    max-width: 400px;
 }
 
-.upload-area.drag-over {
-    border-color: var(--primary-color);
-    background-color: var(--hover-color);
+.drop-zone h3 {
+    margin: 1rem 0;
+    font-size: 1.25rem;
+    font-weight: 500;
 }
 
-.upload-content {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 1rem;
-}
-
-.upload-icon {
-    font-size: 3rem;
+.drop-zone p {
     color: var(--secondary-color);
-}
-
-.upload-area h3 {
-    margin: 0;
-    color: var(--text-color);
-}
-
-.upload-area p {
-    margin: 0;
-    color: var(--secondary-color);
+    margin: 0.5rem 0;
 }
 
 .file-input-label {
     display: inline-block;
-    padding: 0.5rem 1rem;
+    padding: 0.75rem 1.5rem;
     background-color: var(--primary-color);
     color: white;
     border-radius: 4px;
     cursor: pointer;
-    transition: background-color 0.3s ease;
-}
-
-.file-input-label:hover {
-    background-color: var(--primary-color);
-    opacity: 0.9;
+    margin-top: 1rem;
+    font-size: 0.875rem;
 }
 
 #file-input {
@@ -437,4 +432,11 @@ canvas {
 .icon {
     font-size: 1.125rem;
     line-height: 1;
+}
+
+.upload-icon {
+    font-size: 48px;
+    line-height: 1;
+    margin-bottom: 1rem;
+    color: var(--secondary-color);
 } 

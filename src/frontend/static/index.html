@@ -20,19 +20,29 @@
 
         <main class="app-main">
             <section class="upload-section" id="upload-section">
+                <div class="upload-panel">
+                    <span class="step-number">1/3</span>
+                    <h2>Upload video</h2>
+                    <p class="step-description">
+                        Upload your video file to get started. We support common video formats like MP4, MOV, and AVI.
+                    </p>
+                </div>
+
                 <div class="upload-area" id="upload-area">
-                    <div class="upload-content">
-                        <div class="upload-icon">📁</div>
-                        <h3>Drop your video here</h3>
-                        <p>or</p>
-                        <label for="file-input" class="file-input-label">Choose Video File</label>
-                        <input type="file" id="file-input" accept="video/*" required>
-                    </div>
-                    <div class="upload-progress" id="upload-progress" style="display: none;">
-                        <div class="progress-bar">
-                            <div class="progress-fill"></div>
+                    <div class="drop-zone" id="drop-zone">
+                        <div class="upload-content">
+                            <div class="upload-icon">📁</div>
+                            <h3>Drop your video here</h3>
+                            <p>or</p>
+                            <label for="file-input" class="file-input-label">Choose Video File</label>
+                            <input type="file" id="file-input" accept="video/*" required>
                         </div>
-                        <p class="progress-text">Uploading...</p>
+                        <div class="upload-progress" id="upload-progress" style="display: none;">
+                            <div class="progress-bar">
+                                <div class="progress-fill"></div>
+                            </div>
+                            <p class="progress-text">Uploading...</p>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -40,7 +50,7 @@
             <div class="workspace" id="workspace" style="display: none;">
                 <aside class="sidebar">
                     <div class="step-indicator">
-                        <span class="step-number">1/3</span>
+                        <span class="step-number">2/3</span>
                         <h2>Select objects</h2>
                         <p class="step-description">
                             Adjust the selection of your object, or add additional objects.
