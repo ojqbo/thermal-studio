@@ -309,7 +309,7 @@ async def handle_process_video(request):
             
             return web.json_response({
                 "status": "success",
-                "masks": masks
+                "masks": masks.tolist()
             })
             
         except Exception as e:

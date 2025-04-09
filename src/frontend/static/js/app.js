@@ -48,6 +48,10 @@ const addObjectBtn = document.getElementById('add-object');
 const startOverBtn = document.getElementById('start-over');
 const trackObjectsBtn = document.getElementById('track-objects');
 const tooltip = document.getElementById('tooltip');
+const uploadArea = document.getElementById('upload-area');
+const uploadProgress = document.getElementById('upload-progress');
+const progressFill = document.querySelector('.progress-fill');
+const progressText = document.querySelector('.progress-text');
 const fileInput = document.getElementById('file-input');
 
 // Initialize the application
@@ -60,8 +64,11 @@ function init() {
     }
     
     // Add event listeners for file upload
-    uploadForm.addEventListener('submit', handleUpload);
+    uploadArea.addEventListener('dragover', handleDragOver);
+    uploadArea.addEventListener('dragleave', handleDragLeave);
+    uploadArea.addEventListener('drop', handleDrop);
     fileInput.addEventListener('change', handleFileSelect);
+    uploadArea.addEventListener('click', () => fileInput.click());
     
     // Add event listeners for video controls
     playPauseBtn.addEventListener('click', togglePlayPause);
@@ -85,33 +92,59 @@ function init() {
     updateObjectsList();
 }
 
+// Handle drag over
+function handleDragOver(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    uploadArea.classList.add('drag-over');
+}
+
+// Handle drag leave
+function handleDragLeave(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    uploadArea.classList.remove('drag-over');
+}
+
+// Handle drop
+function handleDrop(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    uploadArea.classList.remove('drag-over');
+    
+    const file = event.dataTransfer.files[0];
+    if (file && file.type.startsWith('video/')) {
+        handleFile(file);
+    } else {
+        alert('Please drop a valid video file');
+    }
+}
+
 // Handle file selection
 function handleFileSelect(event) {
     const file = event.target.files[0];
     if (file && file.type.startsWith('video/')) {
-        videoFile = file;
-        document.getElementById('upload-btn').disabled = false;
+        handleFile(file);
     } else {
         alert('Please select a valid video file');
-        document.getElementById('upload-btn').disabled = true;
     }
 }
 
 // Handle file upload
-async function handleUpload(event) {
-    event.preventDefault();
-    
-    if (!videoFile) {
-        alert('Please select a video file first');
-        return;
-    }
+async function handleFile(file) {
+    videoFile = file;
     
     const formData = new FormData();
-    formData.append('file', videoFile);
+    formData.append('file', file);
     
     try {
         isProcessing = true;
         updateUIState();
+        
+        // Show upload progress
+        uploadProgress.style.display = 'block';
+        progressFill.style.width = '0%';
+        progressText.textContent = 'Uploading...';
         
         const response = await fetch('/upload', {
             method: 'POST',
@@ -125,6 +158,10 @@ async function handleUpload(event) {
         const data = await response.json();
         
         if (data.status === 'success') {
+            // Update progress to complete
+            progressFill.style.width = '100%';
+            progressText.textContent = 'Processing...';
+            
             // Store current video information
             currentVideo = {
                 filename: data.filename,
@@ -163,6 +200,9 @@ async function handleUpload(event) {
     } catch (error) {
         console.error('Error uploading video:', error);
         alert(error.message);
+        // Reset upload progress
+        uploadProgress.style.display = 'none';
+        progressFill.style.width = '0%';
     } finally {
         isProcessing = false;
         updateUIState();
