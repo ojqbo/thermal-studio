@@ -53,6 +53,7 @@ class UIManager {
     constructor(state, fileManager) {
         this.state = state;
         this.fileManager = fileManager;
+        this.app = null;  // Will be set by Application class
         this.elements = {
             uploadForm: document.getElementById('upload-form'),
             uploadSection: document.getElementById('upload-section'),
@@ -66,10 +67,12 @@ class UIManager {
             trackObjectsBtn: document.getElementById('track-objects'),
             tooltip: document.getElementById('tooltip'),
             uploadArea: document.getElementById('upload-area'),
+            dropZone: document.getElementById('drop-zone'),
             uploadProgress: document.getElementById('upload-progress'),
             progressFill: document.querySelector('.progress-fill'),
             progressText: document.querySelector('.progress-text'),
-            fileInput: document.getElementById('file-input')
+            fileInput: document.getElementById('file-input'),
+            fileInputLabel: document.querySelector('.file-input-label')
         };
     }
 
@@ -677,6 +680,12 @@ class FileManager {
             this.state.isProcessing = true;
             this.ui.updateUIState();
             
+            // Set uploading state
+            this.ui.app.isUploading = true;
+            
+            // Disable file input label
+            this.ui.elements.fileInputLabel.classList.add('disabled');
+            
             this.ui.elements.uploadProgress.style.display = 'block';
             this.ui.elements.progressFill.style.width = '0%';
             this.ui.elements.progressText.textContent = 'Uploading...';
@@ -726,6 +735,12 @@ class FileManager {
         } finally {
             this.state.isProcessing = false;
             this.ui.updateUIState();
+            
+            // Reset uploading state
+            this.ui.app.isUploading = false;
+            
+            // Re-enable file input label
+            this.ui.elements.fileInputLabel.classList.remove('disabled');
         }
     }
 }
@@ -741,6 +756,8 @@ class Application {
         this.fileManager = new FileManager(this.state, this.ui);
         
         this.ui.videoManager = this.videoManager;
+        this.isUploading = false;  // Add upload state tracking
+        this.ui.app = this;  // Set the app reference in UIManager
     }
 
     init() {
@@ -753,18 +770,21 @@ class Application {
         
         // File upload handlers
         this.ui.elements.uploadArea.addEventListener('dragover', (e) => {
+            if (this.isUploading) return;  // Prevent drag during upload
             e.preventDefault();
             e.stopPropagation();
             this.ui.elements.uploadArea.classList.add('drag-over');
         });
         
         this.ui.elements.uploadArea.addEventListener('dragleave', (e) => {
+            if (this.isUploading) return;  // Prevent drag during upload
             e.preventDefault();
             e.stopPropagation();
             this.ui.elements.uploadArea.classList.remove('drag-over');
         });
         
         this.ui.elements.uploadArea.addEventListener('drop', (e) => {
+            if (this.isUploading) return;  // Prevent drop during upload
             e.preventDefault();
             e.stopPropagation();
             this.ui.elements.uploadArea.classList.remove('drag-over');
@@ -778,6 +798,7 @@ class Application {
         });
         
         this.ui.elements.fileInput.addEventListener('change', (e) => {
+            if (this.isUploading) return;  // Prevent file input change during upload
             const file = e.target.files[0];
             if (file && file.type.startsWith('video/')) {
                 this.fileManager.handleFile(file);
@@ -786,7 +807,10 @@ class Application {
             }
         });
         
-        this.ui.elements.uploadArea.addEventListener('click', () => this.ui.elements.fileInput.click());
+        this.ui.elements.uploadArea.addEventListener('click', (e) => {
+            if (this.isUploading) return;  // Prevent click during upload
+            this.ui.elements.fileInput.click();
+        });
         
         // Video control handlers
         this.ui.elements.playPauseBtn.addEventListener('click', () => this.videoManager.togglePlayPause());

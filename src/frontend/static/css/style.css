@@ -374,6 +374,13 @@ canvas {
     background-color: rgba(26, 26, 26, 0.6);
     width: 100%;
     max-width: 400px;
+    transition: opacity 0.3s ease;
+}
+
+.drop-zone.disabled {
+    opacity: 0.5;
+    pointer-events: none;
+    cursor: not-allowed;
 }
 
 .drop-zone h3 {
@@ -396,6 +403,13 @@ canvas {
     cursor: pointer;
     margin-top: 1rem;
     font-size: 0.875rem;
+    transition: opacity 0.3s ease, cursor 0.3s ease;
+}
+
+.file-input-label.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
 }
 
 #file-input {
