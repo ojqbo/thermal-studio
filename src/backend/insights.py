@@ -50,10 +50,12 @@ def compute_histograms(masks_dict: Dict[int, np.ndarray], file_path: str) -> Dic
     frame_idx = 0
     while True:
         ret, frame = cap.read()
-        # frame.shape = (H, W, 3)
         if not ret:
             break
-            
+
+        frame = convert_to_monochrome(frame)
+        # frame.shape = (H, W, 1)
+        
         # Check if this frame has a corresponding mask
         if frame_idx in masks_dict:
             # Get the mask for this frame
@@ -63,7 +65,7 @@ def compute_histograms(masks_dict: Dict[int, np.ndarray], file_path: str) -> Dic
             num_objects = mask.shape[0]
             
             # Initialize histograms for this frame
-            frame_histograms = np.zeros((3, num_objects, 256), dtype=np.int32)  # For RGB channels
+            frame_histograms = np.zeros((1, num_objects, 256), dtype=np.int32)  # For RGB channels
             
             # For each channel in the mask (each object)
             for obj_idx in range(mask.shape[0]):
@@ -93,9 +95,27 @@ def compute_histograms(masks_dict: Dict[int, np.ndarray], file_path: str) -> Dic
 def convert_to_monochrome(frame: np.ndarray, tsne: bool = False) -> np.ndarray:
     """
     Convert a frame to monochrome.
+
+    Args:
+        frame: The frame to convert to monochrome. Could be of shape [H, W, 3], [H, W, 1], or [H, W].
+        tsne: Whether to use tsne to project the frame onto a 1D space.
+    Returns:
+        The monochrome frame. Shape is [H, W, 1].
     """
+    if len(frame.shape) == 2:
+        return frame[:, :, np.newaxis]
+    
     if not tsne:
-        return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if frame.shape[2] == 3:
+            return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)[:, :, np.newaxis]
+        elif frame.shape[2] == 1:
+            logger.warning("Frame is already monochrome")
+            return frame
+        else:
+            raise ValueError(f"Frame shape {frame.shape} is not supported")
+    
+    if frame.shape[2] != 3:
+        raise ValueError(f"Frame shape {frame.shape} is not supported for tsne")
     
     # find a 1D projection of color space using tsne
     # TODO

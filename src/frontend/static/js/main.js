@@ -367,7 +367,13 @@ class VideoManager {
 
         // Get histogram for current object (convert from 1-based to 0-based index)
         const objectIndex = this.state.currentObjectId - 1;
-        const histograms = frameHistograms.map(channel => channel[objectIndex]); // Get RGB channels
+        
+        // Check histogram format
+        const hasRGBChannels = frameHistograms.length === 3; // [3, num_objects, h, w] format
+        const histograms = hasRGBChannels 
+            ? frameHistograms.map(channel => channel[objectIndex]) // Get RGB channels
+            : [frameHistograms[0][objectIndex]]; // Get single channel
+        
         const binEdges = this.state.histograms.bin_edges[0]; // Use first channel's bin edges
 
         if (!histograms || !binEdges) return;
@@ -399,7 +405,7 @@ class VideoManager {
         const maxValue = Math.max(...histograms.map(h => Math.max(...h)));
 
         // Draw histogram lines for each channel
-        const channelColors = ['#FF4444', '#44FF44', '#4444FF'];
+        const channelColors = hasRGBChannels ? ['#FF4444', '#44FF44', '#4444FF'] : ['#FFFFFF'];
         const barWidth = graphWidth / 256; // 256 bins
 
         histograms.forEach((histogram, channelIndex) => {
@@ -445,25 +451,27 @@ class VideoManager {
             this.histogramCtx.fillText(value.toString(), padding.left - 5, y);
         }
 
-        // Draw channel legend
-        const legendItems = ['R', 'G', 'B'];
-        const legendWidth = 15;
-        const legendSpacing = 40;
-        const legendY = padding.top + 10;
+        // Draw channel legend only if we have RGB channels
+        if (hasRGBChannels) {
+            const legendItems = ['R', 'G', 'B'];
+            const legendWidth = 15;
+            const legendSpacing = 40;
+            const legendY = padding.top + 10;
 
-        legendItems.forEach((item, i) => {
-            const x = padding.left + i * legendSpacing;
-            
-            // Draw color box
-            this.histogramCtx.fillStyle = channelColors[i];
-            this.histogramCtx.fillRect(x, legendY, legendWidth, legendWidth);
-            
-            // Draw label
-            this.histogramCtx.fillStyle = '#fff';
-            this.histogramCtx.textAlign = 'left';
-            this.histogramCtx.textBaseline = 'middle';
-            this.histogramCtx.fillText(item, x + legendWidth + 5, legendY + legendWidth/2);
-        });
+            legendItems.forEach((item, i) => {
+                const x = padding.left + i * legendSpacing;
+                
+                // Draw color box
+                this.histogramCtx.fillStyle = channelColors[i];
+                this.histogramCtx.fillRect(x, legendY, legendWidth, legendWidth);
+                
+                // Draw label
+                this.histogramCtx.fillStyle = '#fff';
+                this.histogramCtx.textAlign = 'left';
+                this.histogramCtx.textBaseline = 'middle';
+                this.histogramCtx.fillText(item, x + legendWidth + 5, legendY + legendWidth/2);
+            });
+        }
     }
 
     parseRGBA(rgba) {
