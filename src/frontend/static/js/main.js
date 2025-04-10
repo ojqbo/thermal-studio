@@ -1240,6 +1240,43 @@ class Application {
     }
 }
 
+// About popup functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const aboutPopup = document.getElementById('about-popup');
+    const closeAboutBtn = document.getElementById('close-about');
+    const aboutLink = document.querySelector('a[href="#about"]');
+
+    function openAboutPopup() {
+        aboutPopup.classList.add('active');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeAboutPopup() {
+        aboutPopup.classList.remove('active');
+        document.body.style.overflow = '';
+    }
+
+    aboutLink.addEventListener('click', function(e) {
+        e.preventDefault();
+        openAboutPopup();
+    });
+
+    closeAboutBtn.addEventListener('click', closeAboutPopup);
+
+    aboutPopup.addEventListener('click', function(e) {
+        if (e.target === aboutPopup) {
+            closeAboutPopup();
+        }
+    });
+
+    // Close popup when pressing Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && aboutPopup.classList.contains('active')) {
+            closeAboutPopup();
+        }
+    });
+});
+
 // Initialize application when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     const app = new Application();
