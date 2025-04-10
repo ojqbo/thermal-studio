@@ -1,7 +1,4 @@
 import os
-import json
-import asyncio
-import aiohttp
 import aiofiles
 import numpy as np
 import cv2
@@ -9,10 +6,9 @@ from aiohttp import web
 from pathlib import Path
 from datetime import datetime
 import logging
-from typing import Dict, List, Any, Optional, TypedDict
+from typing import Dict, List, TypedDict
 import torch
 from sam2.build_sam import build_sam2_video_predictor
-import base64
 
 from insights import compute_histograms
 
