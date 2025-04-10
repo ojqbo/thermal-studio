@@ -1,32 +1,17 @@
-FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
-
-# Set environment variables
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    python3.10 \
-    python3-pip \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+# Use PyTorch base image with CUDA support
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
 
 # Set working directory
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
+# Copy requirements file
 COPY requirements.txt .
+
+# Install Python dependencies
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY src/ ./src/
-COPY data/ ./data/
+# Copy the rest of the application
+COPY . .
 
-# Create necessary directories
-RUN mkdir -p data/videos data/models
-
-# Expose port for the web server
-EXPOSE 8080
-
-# Command to run the application
+# Set the default command
 CMD ["python3", "src/backend/server.py"] 
