@@ -339,6 +339,13 @@ async def handle_process_video(request):
         if DEBUG:
             logger.debug("=== Received Video Processing Request ===")
         
+        # Get request data
+        request_data = await request.json()
+        convert_to_monochrome = request_data.get('convert_to_monochrome', False)
+        
+        if DEBUG:
+            logger.debug(f"Monochrome mode: {convert_to_monochrome}")
+        
         # Process video with SAM2
         try:
             # Process video with prompts
@@ -354,7 +361,7 @@ async def handle_process_video(request):
             masks_json = {str(k): v.tolist() for k, v in masks_dict.items()}
             
             # compute histograms
-            histograms = compute_histograms(masks_dict, current_video_path)
+            histograms = compute_histograms(masks_dict, current_video_path, convert_to_monochrome)
             # convert histograms to a format that can be serialized to JSON
             histograms_json = {
                 "histograms": {str(k): v.tolist() for k, v in histograms["histograms"].items()},

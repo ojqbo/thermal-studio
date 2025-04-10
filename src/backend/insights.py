@@ -10,7 +10,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def compute_histograms(masks_dict: Dict[int, np.ndarray], file_path: str) -> Dict[str, Any]:
+def compute_histograms(masks_dict: Dict[int, np.ndarray], file_path: str = None, convert_to_monochrome: bool = False) -> Dict[str, Any]:
     """
     Compute histograms and other insights from the masks dictionary.
     
@@ -23,6 +23,7 @@ def compute_histograms(masks_dict: Dict[int, np.ndarray], file_path: str) -> Dic
                    The masks are of type uint8, with values 0 and 1,
                    where 1 means the pixel is part of the mask.
         file_path: Path to the video file.
+        convert_to_monochrome: Whether to convert the frame to monochrome.
     Returns:
         Dictionary with keys:
          - "histograms": mapping of frame indices to histograms of all objects in that frame.
@@ -53,7 +54,11 @@ def compute_histograms(masks_dict: Dict[int, np.ndarray], file_path: str) -> Dic
         if not ret:
             break
 
-        frame = convert_to_monochrome(frame)
+        if len(frame.shape) == 2:
+            frame = frame[:, :, np.newaxis]
+        
+        if convert_to_monochrome:
+            frame = _convert_to_monochrome(frame)
         # frame.shape = (H, W, 1)
         
         # Check if this frame has a corresponding mask
@@ -65,7 +70,7 @@ def compute_histograms(masks_dict: Dict[int, np.ndarray], file_path: str) -> Dic
             num_objects = mask.shape[0]
             
             # Initialize histograms for this frame
-            frame_histograms = np.zeros((1, num_objects, 256), dtype=np.int32)  # For RGB channels
+            frame_histograms = np.zeros((frame.shape[2], num_objects, 256), dtype=np.int32)
             
             # For each channel in the mask (each object)
             for obj_idx in range(mask.shape[0]):
@@ -92,7 +97,7 @@ def compute_histograms(masks_dict: Dict[int, np.ndarray], file_path: str) -> Dic
     logger.debug(f"Computed histograms for {len(result['histograms'])} frames")
     return result
 
-def convert_to_monochrome(frame: np.ndarray, tsne: bool = False) -> np.ndarray:
+def _convert_to_monochrome(frame: np.ndarray, tsne: bool = False) -> np.ndarray:
     """
     Convert a frame to monochrome.
 

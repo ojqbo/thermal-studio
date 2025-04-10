@@ -47,6 +47,11 @@ class AppState {
         
         // Update UI to show the first object as active
         this.ui.updateObjectsList();
+        
+        // Reset monochrome toggle
+        if (this.ui.elements.monochromeToggle) {
+            this.ui.elements.monochromeToggle.checked = false;
+        }
     }
 }
 
@@ -74,7 +79,8 @@ class UIManager {
             progressFill: document.querySelector('.progress-fill'),
             progressText: document.querySelector('.progress-text'),
             fileInput: document.getElementById('file-input'),
-            fileInputLabel: document.querySelector('.primary-btn')
+            fileInputLabel: document.querySelector('.primary-btn'),
+            monochromeToggle: document.getElementById('monochrome-toggle')
         };
         this.histogramCanvas = document.getElementById('histogramCanvas');
         this.histogramCtx = this.histogramCanvas ? this.histogramCanvas.getContext('2d') : null;
@@ -928,7 +934,8 @@ class ObjectManager {
                 },
                 body: JSON.stringify({
                     filename: this.state.currentVideo.filename,
-                    prompts: prompts
+                    prompts: prompts,
+                    convert_to_monochrome: this.ui.elements.monochromeToggle.checked
                 })
             });
             
