@@ -1,6 +1,10 @@
 # Use PyTorch base image with CUDA support
 FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
 
+RUN apt-get update && apt-get install -y \
+    python3-opencv \
+    && rm -rf /var/lib/apt/lists/*
+
 # Set working directory
 WORKDIR /app
 
